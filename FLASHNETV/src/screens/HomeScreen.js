@@ -16,7 +16,6 @@ import HeroCarousel from '../components/HeroCarousel';
 import ContentRow from '../components/ContentRow';
 import SportsRow from '../components/SportsRow';
 import FocusableButton from '../components/FocusableButton';
-import TVTopNav from '../components/TVTopNav';
 import BrandLogo from '../components/BrandLogo';
 import Screensaver, { useScreensaver } from '../components/Screensaver';
 import { isTV, isTablet, layout } from '../utils/tv';
@@ -28,6 +27,16 @@ import { getResumePositionMillis, promptResumePlayback, shouldAskResume } from '
 const CURRENT_YEAR = new Date().getFullYear();
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+const TV_HOME_MENU = [
+  { label: 'Inicio', screen: 'Home' },
+  { label: 'TV en vivo', screen: 'LiveTV' },
+  { label: 'Peliculas', screen: 'Movies' },
+  { label: 'Series', screen: 'Series' },
+  { label: 'Buscar', screen: 'Search' },
+  { label: 'Favoritos', screen: 'Favorites' },
+  { label: 'Descargas', screen: 'Downloads' },
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -340,6 +349,30 @@ export default function HomeScreen({ navigation }) {
     ? new Date(parseInt(user.expiration_date) * 1000).toLocaleDateString('es-ES')
     : 'Sin fecha';
 
+  const renderTVHomeMenu = () => {
+    if (!isTV) return null;
+    return (
+      <View style={styles.tvMenuBand}>
+        <View style={styles.tvMenuHeader}>
+          <BrandLogo variant="nav" />
+          <Text style={styles.tvMenuTitle}>Menu principal</Text>
+        </View>
+        <View style={styles.tvMenuGrid}>
+          {TV_HOME_MENU.map((item) => (
+            <FocusableButton
+              key={item.screen}
+              style={styles.tvMenuButton}
+              focusedStyle={styles.tvMenuButtonFocused}
+              onPress={() => navigation.navigate(item.screen)}
+            >
+              <Text style={styles.tvMenuButtonText} numberOfLines={1}>{item.label}</Text>
+            </FocusableButton>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -352,7 +385,6 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <TVTopNav navigation={navigation} current="Home" />
       <ScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
@@ -400,6 +432,8 @@ export default function HomeScreen({ navigation }) {
             onInfo={handleHeroInfo}
           />
         ) : null}
+
+        {renderTVHomeMenu()}
 
         {/* ── ACCESOS RÁPIDOS (complementan los tabs) ── */}
         {!isTV && (
@@ -664,6 +698,55 @@ const styles = StyleSheet.create({
   searchBtnText: { color: colors.white, fontSize: isTV ? 16 : 11, fontWeight: '900' },
   logoutBtn: { borderWidth: 1, borderColor: colors.accentWarm || colors.primary, paddingHorizontal: isTV ? 20 : 10, paddingVertical: isTV ? 10 : 5, borderRadius: 8 },
   logoutText: { color: colors.textSecondary, fontSize: isTV ? 17 : 11, fontWeight: '800' },
+
+  tvMenuBand: {
+    paddingHorizontal: layout.horizontalPadding,
+    paddingTop: 24,
+    paddingBottom: 18,
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(31,125,255,0.22)',
+    gap: 16,
+  },
+  tvMenuHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 18,
+  },
+  tvMenuTitle: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0,
+  },
+  tvMenuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  tvMenuButton: {
+    minWidth: 150,
+    minHeight: 46,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tvMenuButtonFocused: {
+    borderColor: colors.white,
+    backgroundColor: 'rgba(31,125,255,0.34)',
+  },
+  tvMenuButtonText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '900',
+  },
 
   navTabs: {
     flexDirection: 'row',

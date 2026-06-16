@@ -12,7 +12,7 @@ import {
   ImageBackground, useWindowDimensions, FlatList,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { isTV, isTablet, layout } from '../utils/tv';
+import { isTV, isTablet } from '../utils/tv';
 import { colors } from '../theme';
 import { cleanContentTitle } from '../utils/labels';
 import FocusableButton from './FocusableButton';
@@ -55,7 +55,7 @@ export default function HeroCarousel({ items = [], types = [], onPlay, onInfo })
   const { width, height } = useWindowDimensions();
   const isLandscape  = width > height;
   const heroHeight   = isTV
-    ? Math.min(height * layout.heroHeightRatio, 280)
+    ? Math.max(430, Math.round(height * 0.92))
     : isLandscape
     ? Math.min(height * 0.72, 340)
     : height * 0.52;
@@ -102,13 +102,17 @@ export default function HeroCarousel({ items = [], types = [], onPlay, onInfo })
       <ImageBackground
         source={image ? { uri: image } : null}
         style={[styles.slideImage, !image && styles.slideFallback, { height: heroHeight }]}
-        resizeMode="cover"
+        imageStyle={styles.slideImageInner}
+        resizeMode={isTV ? 'contain' : 'cover'}
       >
         <LinearGradient
-          colors={['rgba(0,0,0,0.02)', 'rgba(8,8,8,0.58)', '#080808']}
+          colors={isTV
+            ? ['rgba(5,7,11,0.02)', 'rgba(5,7,11,0.22)', 'rgba(5,7,11,0.72)', '#05070B']
+            : ['rgba(0,0,0,0.02)', 'rgba(8,8,8,0.58)', '#05070B']
+          }
           style={StyleSheet.absoluteFillObject}
         />
-          <View style={[styles.slideContent, { paddingBottom: isTV ? 24 : 32 }]}>
+          <View style={[styles.slideContent, { paddingBottom: isTV ? 70 : 32 }]}>
           <View style={styles.badges}>
             {isNew && (
               <View style={styles.estrenoBadge}>
@@ -132,6 +136,7 @@ export default function HeroCarousel({ items = [], types = [], onPlay, onInfo })
 
           <View style={styles.heroButtons}>
             <FocusableButton
+              hasTVPreferredFocus={isTV}
               style={styles.playBtn}
               focusedStyle={styles.playBtnFocused}
               onPress={() => onPlay && onPlay(item, type)}
@@ -155,7 +160,7 @@ export default function HeroCarousel({ items = [], types = [], onPlay, onInfo })
   if (isTV) {
     const item = validItems[activeIndex];
     return (
-      <View style={{ height: heroHeight }}>
+      <View style={[styles.tvHeroShell, { height: heroHeight }]}>
         <SlideContent item={item} index={activeIndex} />
         {/* Flechas de navegación */}
         {total > 1 && (
@@ -224,9 +229,11 @@ export default function HeroCarousel({ items = [], types = [], onPlay, onInfo })
 }
 
 const styles = StyleSheet.create({
-  slideImage: { width: '100%', justifyContent: 'flex-end' },
+  slideImage: { width: '100%', justifyContent: 'flex-end', backgroundColor: colors.background },
+  slideImageInner: { backgroundColor: colors.background },
   slideFallback: { backgroundColor: '#141422' },
-  slideContent: { paddingHorizontal: isTV ? 38 : 22, paddingTop: isTV ? 20 : 18, gap: isTV ? 7 : 9, maxWidth: isTV ? 780 : '100%' },
+  tvHeroShell: { backgroundColor: colors.background },
+  slideContent: { paddingHorizontal: isTV ? 54 : 22, paddingTop: isTV ? 28 : 18, gap: isTV ? 10 : 9, maxWidth: isTV ? 860 : '100%' },
 
   badges: { flexDirection: 'row', gap: 8, marginBottom: 4 },
   estrenoBadge: {
@@ -251,13 +258,13 @@ const styles = StyleSheet.create({
     textShadowRadius: 8,
   },
   heroRating: { color: colors.accentWarm || '#FFD700', fontSize: isTV ? 14 : 15, fontWeight: '800' },
-  heroButtons: { flexDirection: 'row', gap: isTV ? 12 : 12, marginTop: isTV ? 5 : 8, alignItems: 'center' },
+  heroButtons: { flexDirection: 'row', gap: isTV ? 14 : 12, marginTop: isTV ? 10 : 8, alignItems: 'center' },
   playBtn: {
     flex: 1,
     minWidth: 0,
     backgroundColor: colors.accentWarm || colors.white,
     paddingHorizontal: isTV ? 20 : 14,
-    paddingVertical: isTV ? 9 : 12,
+    paddingVertical: isTV ? 13 : 12,
     borderRadius: 10,
     borderWidth: 3,
     borderColor: 'transparent',
@@ -270,7 +277,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     backgroundColor: 'rgba(80,80,80,0.75)',
     paddingHorizontal: isTV ? 20 : 14,
-    paddingVertical: isTV ? 9 : 12,
+    paddingVertical: isTV ? 13 : 12,
     borderRadius: 10,
     borderWidth: 3,
     borderColor: 'rgba(255,255,255,0.2)',
@@ -281,7 +288,7 @@ const styles = StyleSheet.create({
 
   dots: {
     position: 'absolute',
-    bottom: isTV ? 16 : 10,
+    bottom: isTV ? 30 : 10,
     alignSelf: 'center',
     flexDirection: 'row',
     gap: 6,
