@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, ActivityIndicator, TextInput, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import { isTV, layout } from '../utils/tv';
 import logger from '../utils/logger';
 import { safeBack, useFilterAwareHardwareBack } from '../utils/navigation';
 import { cleanCategoryName, compactCategoryName } from '../utils/labels';
+import { loadLastLiveChannel, mergeLastLiveChannel } from '../utils/liveHistory';
 
 const PRIORITY_LIVE_CATEGORY_GROUPS = [
   ['mundial 2026', 'world cup 2026', 'fifa world cup 2026', 'copa mundial 2026'],
@@ -72,6 +73,7 @@ export default function LiveTVScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [usingCache, setUsingCache] = useState(false);
   const [pinnedIds, setPinnedIds]     = useState([]);
+  const autoplayAttemptedRef = useRef(false);
 
   const clearFilters = useCallback(() => {
     setSearch('');
@@ -90,6 +92,17 @@ export default function LiveTVScreen({ navigation }) {
   useFilterAwareHardwareBack(navigation, hasActiveFilter, clearFilters, 'Home');
 
   useEffect(() => { loadData(); }, []);
+
+  useEffect(() => {
+    if (isTV || loading || autoplayAttemptedRef.current || !channels.length) return;
+    autoplayAttemptedRef.current = true;
+    loadLastLiveChannel()
+      .then((lastChannel) => {
+        const target = mergeLastLiveChannel(lastChannel, channels);
+        if (target) navigation.navigate('Player', { stream: target, type: 'live', returnRoute: 'LiveTV' });
+      })
+      .catch(() => {});
+  }, [channels, loading, navigation]);
 
   const sanitize = (items = [], cats = categories) => {
     return withCategoryNames(items, cats);

@@ -35,6 +35,7 @@ import FocusableButton from '../components/FocusableButton';
 import logger from '../utils/logger';
 import { resetInsideApp } from '../utils/navigation';
 import { cleanCategoryName } from '../utils/labels';
+import { saveLastLiveChannel } from '../utils/liveHistory';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -259,6 +260,10 @@ export default function PlayerScreen({ route, navigation }) {
   }, [externalSubtitles, currentTime, type]);
   const returnRoute = route.params?.returnRoute || null;
   const returnParams = route.params?.returnParams || null;
+
+  useEffect(() => {
+    if (type === 'live') saveLastLiveChannel(stream);
+  }, [stream, type]);
 
   useEffect(() => {
     playbackInfoRef.current = { currentTime, duration, playbackStarted, playerStatus };

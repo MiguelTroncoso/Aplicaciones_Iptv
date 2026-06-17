@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Alert, Text, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, RefreshControl,
+  ScrollView, ActivityIndicator, RefreshControl, Image,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useLibrary } from '../context/LibraryContext';
@@ -22,19 +23,20 @@ import versionInfo from '../../version.json';
 import logger from '../utils/logger';
 import { getRecentlyAdded } from '../utils/contentFilters';
 import { getResumePositionMillis, promptResumePlayback, shouldAskResume } from '../utils/resumePlayback';
+import { loadLastLiveChannel, mergeLastLiveChannel } from '../utils/liveHistory';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 const TV_HOME_MENU = [
-  { label: 'Inicio', screen: 'Home' },
-  { label: 'TV en vivo', screen: 'LiveTV' },
-  { label: 'Peliculas', screen: 'Movies' },
-  { label: 'Series', screen: 'Series' },
-  { label: 'Buscar', screen: 'Search' },
-  { label: 'Favoritos', screen: 'Favorites' },
-  { label: 'Descargas', screen: 'Downloads' },
+  { label: 'TV', screen: 'LiveTV', icon: '▣' },
+  { label: 'DESTACADOS', screen: 'Home', icon: '◆' },
+  { label: 'PELICULA', screen: 'Movies', icon: '●' },
+  { label: 'SERIES', screen: 'Series', icon: '▤' },
+  { label: 'KIDS', screen: 'Search', icon: '☻' },
+  { label: 'ANIME', screen: 'Search', icon: '♣' },
+  { label: 'EXPLORAR', screen: 'Search', icon: '⌕' },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -73,11 +75,14 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [usingCache, setUsingCache] = useState(false);
   const [liveChannels, setLiveChannels] = useState([]);
+  const [allLiveChannels, setAllLiveChannels] = useState([]);
+  const [lastLiveChannel, setLastLiveChannel] = useState(null);
   const [movies, setMovies]         = useState([]);
   const [series, setSeries]         = useState([]);
 
   useEffect(() => {
     loadContent();
+    loadLastLiveChannel().then(setLastLiveChannel).catch(() => {});
     const t = setTimeout(() => checkForUpdates(true), 4000);
     // Verificar sesión cada vez que el home se monta
     // Pedir permiso de notificaciones suavemente (solo si no fue pedido antes)
@@ -96,6 +101,10 @@ export default function HomeScreen({ navigation }) {
     }, 3000);
     return () => { clearTimeout(t); clearTimeout(s); clearTimeout(notifTimer); };
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    if (isTV) loadLastLiveChannel().then(setLastLiveChannel).catch(() => {});
+  }, []));
 
   // ─── Secciones derivadas ──────────────────────────────────────────────────
 
@@ -205,6 +214,7 @@ export default function HomeScreen({ navigation }) {
   // ─── Carga de datos ───────────────────────────────────────────────────────
 
   const applyHomeData = (live = [], vod = [], ser = [], fromCache = false) => {
+    setAllLiveChannels(live || []);
     setLiveChannels(pickHomeHighlights(live || [], 'live', isTV ? 40 : 25));
     setMovies(pickHomeHighlights(vod || [], 'movie', isTV ? 60 : 40));
     setSeries(pickHomeHighlights(ser || [], 'series', isTV ? 60 : 40));
@@ -240,6 +250,7 @@ export default function HomeScreen({ navigation }) {
 
       const fetchLive = getLiveStreams(server.url, user.username, user.password)
         .then(data => {
+          setAllLiveChannels(data || []);
           const compact = pickHomeHighlights(data || [], 'live', 60);
           setLiveChannels(compact);
           setLoading(false);
@@ -348,23 +359,46 @@ export default function HomeScreen({ navigation }) {
     ? new Date(parseInt(user.expiration_date) * 1000).toLocaleDateString('es-ES')
     : 'Sin fecha';
 
+  const tvSortedChannels = useMemo(() => {
+    const pool = allLiveChannels.length ? allLiveChannels : liveChannels;
+    return [...pool].sort((a, b) =>
+      String(a?.name || '').localeCompare(String(b?.name || ''), 'es', { sensitivity: 'base' })
+    );
+  }, [allLiveChannels, liveChannels]);
+
+  const tvPreviewChannel = useMemo(
+    () => mergeLastLiveChannel(lastLiveChannel, tvSortedChannels),
+    [lastLiveChannel, tvSortedChannels]
+  );
+
+  const openLiveFromHome = useCallback((channel = tvPreviewChannel) => {
+    if (channel) {
+      navigation.navigate('Player', { stream: channel, type: 'live', returnRoute: 'MainTabs' });
+      return;
+    }
+    navigation.navigate('LiveTV');
+  }, [navigation, tvPreviewChannel]);
+
   const renderTVHomeMenu = () => {
     if (!isTV) return null;
     return (
       <View style={styles.tvMenuBand}>
         <View style={styles.tvMenuHeader}>
           <BrandLogo variant="nav" />
-          <Text style={styles.tvMenuTitle}>Menu principal</Text>
         </View>
         <View style={styles.tvMenuGrid}>
-          {TV_HOME_MENU.map((item) => (
+          {TV_HOME_MENU.map((item, index) => (
             <FocusableButton
-              key={item.screen}
-              style={styles.tvMenuButton}
+              key={`${item.screen}-${item.label}`}
+              style={[styles.tvMenuButton, index === 0 && styles.tvMenuButtonActive, index > 1 && styles.tvMenuButtonMuted]}
               focusedStyle={styles.tvMenuButtonFocused}
-              onPress={() => navigation.navigate(item.screen)}
+              onPress={() => {
+                if (item.screen === 'LiveTV') openLiveFromHome();
+                else navigation.navigate(item.screen);
+              }}
             >
-              <Text style={styles.tvMenuButtonText} numberOfLines={1}>{item.label}</Text>
+              <Text style={[styles.tvMenuButtonIcon, index === 0 && styles.tvMenuButtonIconActive]}>{item.icon}</Text>
+              <Text style={[styles.tvMenuButtonText, index === 0 && styles.tvMenuButtonTextActive]} numberOfLines={1}>{item.label}</Text>
             </FocusableButton>
           ))}
         </View>
@@ -417,24 +451,45 @@ export default function HomeScreen({ navigation }) {
 
         {/* ── HERO CARRUSEL ── */}
         {isTV ? (
-          <View style={styles.tvShowcase}>
+          <View style={styles.tvDashboard}>
             {renderTVHomeMenu()}
-            <View style={styles.tvShowcaseHero}>
-              {heroItems.length > 0 ? (
-                <HeroCarousel
-                  items={heroItems}
-                  types={heroTypes}
-                  onPlay={handleHeroPlay}
-                  onInfo={handleHeroInfo}
-                />
-              ) : movies.length > 0 ? (
-                <HeroCarousel
-                  items={movies.slice(0, 6)}
-                  types={movies.slice(0, 6).map(() => 'movie')}
-                  onPlay={handleHeroPlay}
-                  onInfo={handleHeroInfo}
-                />
-              ) : null}
+
+            <FocusableButton
+              style={styles.tvLivePreview}
+              focusedStyle={styles.tvLivePreviewFocused}
+              onPress={() => openLiveFromHome()}
+            >
+              <View style={styles.tvLivePreviewImage}>
+                {tvPreviewChannel?.stream_icon ? (
+                  <Image source={{ uri: tvPreviewChannel.stream_icon }} style={styles.tvLiveLogo} resizeMode="contain" />
+                ) : (
+                  <Text style={styles.tvLiveFallback}>TV</Text>
+                )}
+                <View style={styles.tvLiveShade} />
+                <Text style={styles.tvLiveName} numberOfLines={1}>{tvPreviewChannel?.name || 'TV en vivo'}</Text>
+                <Text style={styles.tvLiveExpand}>⛶</Text>
+              </View>
+            </FocusableButton>
+
+            <View style={styles.tvChannelRail}>
+              <Text style={styles.tvRailArrow}>⌃</Text>
+              {tvSortedChannels.slice(0, 6).map((channel) => (
+                <FocusableButton
+                  key={`tv-home-${channel.stream_id || channel.name}`}
+                  style={styles.tvRailChannel}
+                  focusedStyle={styles.tvRailChannelFocused}
+                  onPress={() => openLiveFromHome(channel)}
+                >
+                  {channel.stream_icon ? (
+                    <Image source={{ uri: channel.stream_icon }} style={styles.tvRailLogo} resizeMode="contain" />
+                  ) : (
+                    <View style={styles.tvRailLogoFallback}>
+                      <Text style={styles.tvRailLogoText}>{channel.name?.charAt(0)}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.tvRailName} numberOfLines={1}>{channel.name}</Text>
+                </FocusableButton>
+              ))}
             </View>
           </View>
         ) : heroItems.length > 0 ? (
@@ -712,27 +767,25 @@ const styles = StyleSheet.create({
   logoutBtn: { borderWidth: 1, borderColor: colors.accentWarm || colors.primary, paddingHorizontal: isTV ? 20 : 10, paddingVertical: isTV ? 10 : 5, borderRadius: 8 },
   logoutText: { color: colors.textSecondary, fontSize: isTV ? 17 : 11, fontWeight: '800' },
 
-  tvShowcase: {
+  tvDashboard: {
     flexDirection: 'row',
-    paddingHorizontal: layout.horizontalPadding,
-    paddingTop: 18,
-    paddingBottom: 8,
-    gap: 16,
-    backgroundColor: colors.background,
-  },
-  tvShowcaseHero: {
-    flex: 1,
-    minWidth: 0,
+    paddingHorizontal: isTV ? 58 : layout.horizontalPadding,
+    paddingTop: isTV ? 24 : 18,
+    paddingBottom: isTV ? 18 : 8,
+    gap: isTV ? 22 : 16,
+    backgroundColor: '#020202',
+    minHeight: isTV ? 520 : undefined,
+    alignItems: 'center',
   },
   tvMenuBand: {
-    width: 172,
+    width: 150,
     flexShrink: 0,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    backgroundColor: 'rgba(5,7,11,0.72)',
-    borderRightWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    gap: 14,
+    alignSelf: 'stretch',
+    paddingTop: 6,
+    paddingBottom: 8,
+    paddingHorizontal: 0,
+    backgroundColor: 'rgba(0,0,0,0.30)',
+    gap: 34,
   },
   tvMenuHeader: {
     alignItems: 'center',
@@ -746,26 +799,133 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   tvMenuGrid: {
-    gap: 8,
+    gap: 16,
   },
   tvMenuButton: {
-    minHeight: 42,
-    paddingHorizontal: 12,
+    minHeight: 38,
+    paddingHorizontal: 4,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: 'transparent',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    alignItems: 'flex-start',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 11,
+    opacity: 0.58,
+  },
+  tvMenuButtonActive: {
+    opacity: 1,
+  },
+  tvMenuButtonMuted: {
+    opacity: 0.42,
   },
   tvMenuButtonFocused: {
-    borderColor: colors.white,
-    backgroundColor: 'rgba(31,125,255,0.52)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(31,125,255,0.20)',
+  },
+  tvMenuButtonIcon: {
+    width: 22,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  tvMenuButtonIconActive: {
+    color: colors.primary,
   },
   tvMenuButtonText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  tvMenuButtonTextActive: {
     color: colors.white,
-    fontSize: 13,
-    fontWeight: '900',
+  },
+  tvLivePreview: {
+    flex: 1,
+    minWidth: 0,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#090909',
+  },
+  tvLivePreviewFocused: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(31,125,255,0.10)',
+  },
+  tvLivePreviewImage: {
+    flex: 1,
+    minHeight: 430,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    backgroundColor: '#101010',
+  },
+  tvLiveLogo: { width: '52%', height: '44%', opacity: 0.52 },
+  tvLiveFallback: { color: colors.white, fontSize: 96, fontWeight: '900', opacity: 0.16 },
+  tvLiveShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.22)' },
+  tvLiveName: {
+    position: 'absolute',
+    right: 24,
+    bottom: 18,
+    color: colors.white,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  tvLiveExpand: {
+    position: 'absolute',
+    right: 18,
+    bottom: 48,
+    color: colors.white,
+    fontSize: 24,
+  },
+  tvChannelRail: {
+    width: 260,
+    alignSelf: 'stretch',
+    paddingTop: 42,
+    gap: 12,
+  },
+  tvRailArrow: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 32,
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  tvRailChannel: {
+    minHeight: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    paddingHorizontal: 8,
+  },
+  tvRailChannelFocused: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(31,125,255,0.18)',
+  },
+  tvRailLogo: {
+    width: 68,
+    height: 58,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  tvRailLogoFallback: {
+    width: 68,
+    height: 58,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tvRailLogoText: { color: colors.white, fontSize: 24, fontWeight: '900' },
+  tvRailName: {
+    flex: 1,
+    color: colors.white,
+    fontSize: 18,
+    fontWeight: '600',
   },
 
   navTabs: {
