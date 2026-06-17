@@ -15,6 +15,7 @@ import LiveTVScreen from './src/screens/LiveTVScreen';
 import MoviesScreen from './src/screens/MoviesScreen';
 import SeriesScreen from './src/screens/SeriesScreen';
 import SearchScreen from './src/screens/SearchScreen';
+import AccountScreen from './src/screens/AccountScreen';
 import SeriesDetailScreen from './src/screens/SeriesDetailScreen';
 import PlayerScreen from './src/screens/PlayerScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
@@ -70,17 +71,25 @@ const IPTVTabButton = ({ children, onPress, accessibilityState, style }) => {
   );
 };
 
-const createTabOptions = (label, iconLabel) => ({
+const createTabOptions = (label, iconLabel, extraOptions = {}) => ({
   tabBarLabel: label,
   tabBarIcon: ({ focused }) => <TabIcon label={iconLabel} focused={focused} />,
   tabBarButton: (props) => <IPTVTabButton {...props} />,
+  ...extraOptions,
 });
+
+const hiddenMobileTabOptions = isTV
+  ? {}
+  : {
+      tabBarButton: () => null,
+      tabBarItemStyle: { display: 'none' },
+    };
 
 function MainTabs() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const safeBottom = Math.max(insets.bottom || 0, Platform.OS === 'android' && !isTV ? 42 : 0);
-  const tabBarHeight = (isTV ? 96 : 84) + safeBottom;
+  const tabBarHeight = (isTV ? 96 : 78) + safeBottom;
 
   return (
     <Tab.Navigator
@@ -91,21 +100,22 @@ function MainTabs() {
           borderTopColor: 'rgba(31,125,255,0.22)',
           borderTopWidth: 1,
           height: tabBarHeight,
-          paddingBottom: safeBottom + 14,
-          paddingTop: 9,
+          paddingBottom: safeBottom + 10,
+          paddingTop: 7,
           overflow: 'visible',
         },
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textSecondary,
-        tabBarLabelStyle: { fontSize: isTV ? 16 : 11, fontWeight: '800', letterSpacing: 0, marginTop: 2 },
+        tabBarLabelStyle: { fontSize: isTV ? 16 : 10, fontWeight: '800', letterSpacing: 0, marginTop: 0 },
         tabBarItemStyle: { paddingVertical: isTV ? 5 : 3, overflow: 'visible' },
       }}
     >
-      <Tab.Screen name="Home" component={HomeScreen} options={createTabOptions('Inicio', 'IN')} />
-      <Tab.Screen name="LiveTV" component={LiveTVScreen} options={createTabOptions('TV en vivo', 'TV')} />
-      <Tab.Screen name="Movies" component={MoviesScreen} options={createTabOptions('Peliculas', 'PE')} />
-      <Tab.Screen name="Series" component={SeriesScreen} options={createTabOptions('Series', 'SE')} />
-      <Tab.Screen name="Search" component={SearchScreen} options={createTabOptions('Buscar', 'BU')} />
+      <Tab.Screen name="Home" component={HomeScreen} options={createTabOptions('Inicio', '⌂')} />
+      <Tab.Screen name="LiveTV" component={LiveTVScreen} options={createTabOptions('TV', '▣')} />
+      <Tab.Screen name="Movies" component={MoviesScreen} options={createTabOptions('Peliculas', 'PE', hiddenMobileTabOptions)} />
+      <Tab.Screen name="Series" component={SeriesScreen} options={createTabOptions('Series', 'SE', hiddenMobileTabOptions)} />
+      <Tab.Screen name="Search" component={SearchScreen} options={createTabOptions('Buscar', '⌕', hiddenMobileTabOptions)} />
+      <Tab.Screen name="Account" component={AccountScreen} options={createTabOptions('Cuenta', '○')} />
     </Tab.Navigator>
   );
 }
@@ -120,7 +130,7 @@ function LoadingScreen() {
 
 const PLAYER_SCREENS = new Set(['Player']);
 const EXIT_SCREENS = new Set(['Login']);
-const TAB_ROOT_SCREENS = new Set(['Home', 'LiveTV', 'Movies', 'Series', 'Search', 'MainTabs']);
+const TAB_ROOT_SCREENS = new Set(['Home', 'LiveTV', 'Movies', 'Series', 'Search', 'Account', 'MainTabs']);
 
 function AppNavigator() {
   const { theme: appTheme } = useTheme();

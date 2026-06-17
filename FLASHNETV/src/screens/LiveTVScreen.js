@@ -9,6 +9,7 @@ import { deriveCategoriesFromItems, getCache, mergeCategories, saveCache, withCa
 import { colors, shadows } from '../theme';
 import FocusableButton from '../components/FocusableButton';
 import TVTopNav from '../components/TVTopNav';
+import BrandLogo from '../components/BrandLogo';
 import { isTV, layout } from '../utils/tv';
 import logger from '../utils/logger';
 import { safeBack, useFilterAwareHardwareBack } from '../utils/navigation';
@@ -66,6 +67,7 @@ export default function LiveTVScreen({ navigation }) {
   const [epg, setEpg] = useState([]);
   const [epgLoading, setEpgLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [mobileTab, setMobileTab] = useState('category');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [usingCache, setUsingCache] = useState(false);
@@ -157,12 +159,21 @@ export default function LiveTVScreen({ navigation }) {
   };
 
   const filterByCategory = (catId) => {
+    setMobileTab('category');
     setSelectedCategory(catId);
     setSearch('');
     setFiltered(filterChannelsByCategory(channels, catId));
   };
 
+  const showFavoritesOnly = () => {
+    setMobileTab('favorites');
+    setSelectedCategory(null);
+    setSearch('');
+    setFiltered(channels.filter(channel => isFavorite(channel, 'live')));
+  };
+
   const filterBySearch = (text) => {
+    setMobileTab('category');
     setSearch(text);
     setSelectedCategory(null);
     if (!text) setFiltered(channels);
@@ -195,6 +206,8 @@ export default function LiveTVScreen({ navigation }) {
     return [...pinned, ...rest];
   }, [filtered, pinnedIds]);
 
+  const previewChannel = selectedChannel || sortedChannels[0] || channels[0] || null;
+
   const listHeader = (
     <View>
       <TVTopNav navigation={navigation} current="LiveTV" />
@@ -204,12 +217,50 @@ export default function LiveTVScreen({ navigation }) {
         <FocusableButton onPress={() => navigation.navigate('EPG')} style={styles.epgBtn}><Text style={styles.epgBtnText}>📅 EPG</Text></FocusableButton>
       </View>
 
+      {!isTV && (
+        <>
+          <View style={styles.mobileTopBar}>
+            <BrandLogo variant="nav" style={styles.mobileLogo} />
+            <FocusableButton style={styles.mobileSearchBtn} onPress={() => navigation.navigate('Search')}>
+              <Text style={styles.mobileSearchText}>⌕</Text>
+            </FocusableButton>
+          </View>
+
+          <FocusableButton
+            style={styles.mobilePreview}
+            onPress={() => {
+              if (previewChannel) navigation.navigate('Player', { stream: previewChannel, type: 'live', returnRoute: 'LiveTV' });
+            }}
+          >
+            {previewChannel?.stream_icon ? (
+              <Image source={{ uri: previewChannel.stream_icon }} style={styles.mobilePreviewLogo} resizeMode="contain" />
+            ) : (
+              <Text style={styles.mobilePreviewFallback}>TV</Text>
+            )}
+            <View style={styles.mobilePreviewShade} />
+            <Text style={styles.mobilePreviewName} numberOfLines={1}>{previewChannel?.name || 'TV en vivo'}</Text>
+            <Text style={styles.mobilePreviewPlay}>▶</Text>
+            <Text style={styles.mobilePreviewSound}>◔</Text>
+            <Text style={styles.mobilePreviewExpand}>⛶</Text>
+          </FocusableButton>
+
+          <View style={styles.mobileModeTabs}>
+            <FocusableButton style={[styles.mobileModeTab, mobileTab === 'category' && styles.mobileModeTabActive]} onPress={() => filterByCategory(selectedCategory)}>
+              <Text style={[styles.mobileModeText, mobileTab === 'category' && styles.mobileModeTextActive]}>Categoria</Text>
+            </FocusableButton>
+            <FocusableButton style={[styles.mobileModeTab, mobileTab === 'favorites' && styles.mobileModeTabActive]} onPress={showFavoritesOnly}>
+              <Text style={[styles.mobileModeText, mobileTab === 'favorites' && styles.mobileModeTextActive]}>Favoritos</Text>
+            </FocusableButton>
+          </View>
+        </>
+      )}
+
       <View style={styles.searchWrapper}>
         <TextInput style={styles.searchInput} placeholder="Buscar canal..." placeholderTextColor="#444" value={search} onChangeText={filterBySearch} />
       </View>
 
       <FlatList
-        data={[{ category_id: null, category_name: 'Todos' }, ...categories]}
+        data={[{ category_id: null, category_name: isTV ? 'Todos' : 'ChannelList' }, ...categories]}
         renderItem={renderCategory}
         keyExtractor={(item, index) => index.toString()}
         horizontal
@@ -236,9 +287,36 @@ export default function LiveTVScreen({ navigation }) {
     );
   }
 
-  const renderChannel = ({ item }) => {
+  const renderChannel = ({ item, index }) => {
     const fav    = isFavorite(item, 'live');
     const pinned = isPinned(item);
+    if (!isTV) {
+      return (
+        <FocusableButton
+          style={styles.mobileChannelRow}
+          onPress={() => { navigation.navigate('Player', { stream: item, type: 'live', returnRoute: 'LiveTV' }); }}
+          onLongPress={() => toggleFavorite(item, 'live')}
+          onFocus={() => setSelectedChannel(item)}
+        >
+          {item.stream_icon ? (
+            <Image source={{ uri: item.stream_icon }} style={styles.mobileChannelLogo} resizeMode="contain" />
+          ) : (
+            <View style={styles.mobileChannelLogoFallback}>
+              <Text style={styles.mobileChannelLogoText}>{item.name?.charAt(0)}</Text>
+            </View>
+          )}
+          <View style={styles.mobileChannelInfo}>
+            <Text style={[styles.mobileChannelName, index === 0 && styles.mobileChannelNameActive]} numberOfLines={1}>
+              {item.num || index + 1}  {item.name}
+            </Text>
+            <Text style={styles.mobileChannelMeta} numberOfLines={1}>
+              {fav ? 'Favorito' : 'Recibiendo la programacion'}
+            </Text>
+          </View>
+          <Text style={styles.mobileChannelArrow}>›</Text>
+        </FocusableButton>
+      );
+    }
     return (
       <FocusableButton style={styles.channelRow}
         onPress={() => { navigation.navigate('Player', { stream: item, type: 'live', returnRoute: 'LiveTV' }); }}
@@ -283,26 +361,77 @@ export default function LiveTVScreen({ navigation }) {
 const logoSize = isTV ? 34 : 48;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: isTV ? colors.background : '#171720' },
   loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', gap: 16 },
   loadingText: { color: colors.textSecondary, fontSize: isTV ? 16 : 14 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: layout.horizontalPadding, paddingTop: isTV ? 10 : 8, paddingBottom: isTV ? 10 : 18 },
+  header: isTV
+    ? { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: layout.horizontalPadding, paddingTop: 10, paddingBottom: 10 }
+    : { display: 'none' },
   backBtn: { padding: isTV ? 5 : 8, borderWidth: 1, borderColor: 'transparent', borderRadius: 8 },
   backText: { color: colors.accent, fontSize: isTV ? 13 : 14 },
   title: { color: colors.white, fontSize: isTV ? 25 : 28, fontWeight: '900', letterSpacing: 0.4 },
   count: { color: colors.textSecondary, fontSize: isTV ? 15 : 12 },
   epgBtn: { paddingHorizontal: isTV ? 12 : 14, paddingVertical: isTV ? 7 : 9, borderRadius: 999, borderWidth: 1.5, borderColor: colors.accentWarm || colors.primary, backgroundColor: 'rgba(246,182,63,0.08)' },
   epgBtnText: { color: colors.accentWarm || colors.primary, fontSize: isTV ? 12 : 13, fontWeight: '900' },
-  searchWrapper: { marginHorizontal: layout.horizontalPadding, marginBottom: isTV ? 8 : 14, backgroundColor: colors.surfaceElevated || colors.card, borderRadius: isTV ? 12 : 18, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.08)' },
+  mobileTopBar: {
+    height: 64,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1b1b24',
+  },
+  mobileLogo: { maxWidth: 120 },
+  mobileSearchBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  mobileSearchText: { color: colors.white, fontSize: 38, fontWeight: '300' },
+  mobilePreview: {
+    height: 322,
+    backgroundColor: '#101019',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  mobilePreviewLogo: { width: '64%', height: '54%', opacity: 0.62 },
+  mobilePreviewFallback: { color: colors.white, fontSize: 72, fontWeight: '900', opacity: 0.18 },
+  mobilePreviewShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
+  mobilePreviewName: {
+    position: 'absolute',
+    top: 18,
+    right: 18,
+    left: 130,
+    color: 'rgba(255,255,255,0.32)',
+    fontSize: 12,
+    textAlign: 'right',
+  },
+  mobilePreviewPlay: { position: 'absolute', alignSelf: 'center', color: colors.white, fontSize: 62, opacity: 0.92 },
+  mobilePreviewSound: { position: 'absolute', left: 22, bottom: 24, color: colors.white, fontSize: 36 },
+  mobilePreviewExpand: { position: 'absolute', right: 22, bottom: 24, color: colors.white, fontSize: 30 },
+  mobileModeTabs: {
+    height: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#171720',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  mobileModeTab: { flex: 1, height: '100%', alignItems: 'center', justifyContent: 'center' },
+  mobileModeTabActive: { borderBottomWidth: 2, borderBottomColor: colors.primary },
+  mobileModeText: { color: colors.white, fontSize: 24, fontWeight: '400' },
+  mobileModeTextActive: { color: colors.primary },
+  searchWrapper: isTV
+    ? { marginHorizontal: layout.horizontalPadding, marginBottom: 8, backgroundColor: colors.surfaceElevated || colors.card, borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.08)' }
+    : { display: 'none' },
   searchInput: { color: colors.white, padding: isTV ? 10 : 12, fontSize: isTV ? 13 : 14 },
   cacheText: { color: colors.accent, fontSize: isTV ? 13 : 11, textAlign: 'center', marginBottom: 8 },
-  catList: { marginBottom: isTV ? 6 : 10, height: isTV ? 50 : 64, flexGrow: 0 },
-  catContent: { paddingHorizontal: layout.horizontalPadding, paddingVertical: isTV ? 5 : 8, gap: isTV ? 6 : 8, alignItems: 'center' },
-  catBtn: { minHeight: isTV ? 34 : 46, justifyContent: 'center', paddingHorizontal: isTV ? 10 : 14, paddingVertical: isTV ? 6 : 9, borderRadius: 999, backgroundColor: colors.surfaceElevated || colors.card, borderWidth: 2, borderColor: 'rgba(255,255,255,0.08)' },
-  catBtnActive: { backgroundColor: colors.accentWarm || colors.primary, borderColor: colors.accentWarm || colors.primary },
-  catText: { color: colors.white, fontSize: isTV ? 11 : 13, fontWeight: '900', zIndex: 2 },
-  catTextActive: { color: '#111', fontWeight: '900', zIndex: 2 },
-  channelList: { paddingHorizontal: layout.horizontalPadding, paddingVertical: isTV ? 8 : 16, gap: 10 },
+  catList: { marginBottom: isTV ? 6 : 0, height: isTV ? 50 : 56, flexGrow: 0, backgroundColor: isTV ? 'transparent' : '#171720' },
+  catContent: { paddingHorizontal: isTV ? layout.horizontalPadding : 8, paddingVertical: isTV ? 5 : 9, gap: isTV ? 6 : 10, alignItems: 'center' },
+  catBtn: { minHeight: isTV ? 34 : 36, justifyContent: 'center', paddingHorizontal: isTV ? 10 : 12, paddingVertical: isTV ? 6 : 6, borderRadius: isTV ? 999 : 8, backgroundColor: colors.surfaceElevated || colors.card, borderWidth: isTV ? 2 : 1, borderColor: 'rgba(255,255,255,0.08)' },
+  catBtnActive: { backgroundColor: isTV ? (colors.accentWarm || colors.primary) : colors.primary, borderColor: isTV ? (colors.accentWarm || colors.primary) : colors.primary },
+  catText: { color: colors.white, fontSize: isTV ? 11 : 16, fontWeight: isTV ? '900' : '600', zIndex: 2 },
+  catTextActive: { color: isTV ? '#111' : colors.white, fontWeight: '900', zIndex: 2 },
+  channelList: { paddingHorizontal: isTV ? layout.horizontalPadding : 0, paddingVertical: isTV ? 8 : 0, gap: isTV ? 10 : 0, paddingBottom: isTV ? 8 : 96 },
   channelRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceElevated || colors.card, borderRadius: isTV ? 10 : 18, padding: isTV ? 8 : 14, borderWidth: 2, borderColor: 'rgba(255,255,255,0.08)', gap: isTV ? 10 : 12, marginBottom: isTV ? 8 : 12 },
   channelLogo: { width: logoSize, height: logoSize, borderRadius: 8, backgroundColor: '#0f0f14' },
   channelLogoPlaceholder: { width: logoSize, height: logoSize, borderRadius: 8, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
@@ -315,4 +444,29 @@ const styles = StyleSheet.create({
   liveBadge: { backgroundColor: '#ff3b3b22', borderRadius: 5, paddingHorizontal: isTV ? 6 : 8, paddingVertical: isTV ? 3 : 4, borderWidth: 1, borderColor: '#ff3b3b55' },
   liveText: { color: '#ff5555', fontSize: isTV ? 9 : 10, fontWeight: 'bold', letterSpacing: 0.5 },
   pinIcon: { color: colors.accentWarm || '#FFD700', fontSize: isTV ? 14 : 16 },
+  mobileChannelRow: {
+    minHeight: 78,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    gap: 16,
+    backgroundColor: '#1d1d27',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.045)',
+  },
+  mobileChannelLogo: { width: 54, height: 44, backgroundColor: 'rgba(0,0,0,0.18)' },
+  mobileChannelLogoFallback: {
+    width: 54,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileChannelLogoText: { color: colors.white, fontSize: 20, fontWeight: '900' },
+  mobileChannelInfo: { flex: 1 },
+  mobileChannelName: { color: colors.white, fontSize: 22, fontWeight: '500' },
+  mobileChannelNameActive: { color: colors.primary },
+  mobileChannelMeta: { color: '#9fa7bd', fontSize: 14, marginTop: 3, fontWeight: '500' },
+  mobileChannelArrow: { color: '#c9ced8', fontSize: 42, fontWeight: '200' },
 });
