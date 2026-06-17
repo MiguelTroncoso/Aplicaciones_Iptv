@@ -14,6 +14,48 @@ import logger from '../utils/logger';
 import { safeBack, useFilterAwareHardwareBack } from '../utils/navigation';
 import { cleanCategoryName, compactCategoryName } from '../utils/labels';
 
+const PRIORITY_LIVE_CATEGORY_GROUPS = [
+  ['mundial 2026', 'world cup 2026', 'fifa world cup 2026', 'copa mundial 2026'],
+  ['eventos exclusivos', 'exclusive events'],
+  ['eventos', 'events'],
+  ['deportes', 'sports'],
+  ['futbol', 'football', 'soccer'],
+];
+
+const normalizeCategorySearch = (value = '') =>
+  String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+const getCategoryPriority = (category) => {
+  const name = normalizeCategorySearch(category?.category_name || category?.name || '');
+  const groupIndex = PRIORITY_LIVE_CATEGORY_GROUPS.findIndex(group =>
+    group.some(term => name.includes(term))
+  );
+  return groupIndex === -1 ? PRIORITY_LIVE_CATEGORY_GROUPS.length : groupIndex;
+};
+
+const sortLiveCategories = (items = []) =>
+  [...items].sort((a, b) => {
+    const priorityDiff = getCategoryPriority(a) - getCategoryPriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    return String(a?.category_name || '').localeCompare(String(b?.category_name || ''), 'es', { sensitivity: 'base' });
+  });
+
+const getPreferredLiveCategoryId = (items = [], channels = []) => {
+  const preferred = items.find(item =>
+    channels.some(channel => String(channel.category_id) === String(item?.category_id))
+  );
+  return preferred?.category_id ?? null;
+};
+
+const filterChannelsByCategory = (items = [], categoryId = null) => {
+  if (categoryId === null || categoryId === undefined) return items;
+  return items.filter(channel => String(channel.category_id) === String(categoryId));
+};
+
 export default function LiveTVScreen({ navigation }) {
   const { user, server } = useAuth();
   const { isFavorite, toggleFavorite } = useLibrary();
@@ -51,6 +93,20 @@ export default function LiveTVScreen({ navigation }) {
     return withCategoryNames(items, cats);
   };
 
+  const applyLiveChannelState = (items = [], cats = [], preferredCategoryId) => {
+    const sortedCats = sortLiveCategories(cats);
+    const data = sanitize(items, sortedCats);
+    const nextSelectedCategory = preferredCategoryId !== undefined
+      ? preferredCategoryId
+      : getPreferredLiveCategoryId(sortedCats, data);
+
+    setCategories(sortedCats);
+    setChannels(data);
+    setSelectedCategory(nextSelectedCategory);
+    setFiltered(filterChannelsByCategory(data, nextSelectedCategory));
+    return data;
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -62,10 +118,7 @@ export default function LiveTVScreen({ navigation }) {
       if (cached?.data?.length) {
         cachedData = cached.data;
         knownCategories = deriveCategoriesFromItems(cachedData);
-        if (knownCategories.length) setCategories(knownCategories);
-        const data = sanitize(cachedData, knownCategories);
-        setChannels(data);
-        setFiltered(data);
+        const data = applyLiveChannelState(cachedData, knownCategories);
         setUsingCache(true);
         setLoading(false);
         if (cached.isFresh) {
@@ -73,10 +126,7 @@ export default function LiveTVScreen({ navigation }) {
             .then((cats) => {
               const mergedCats = mergeCategories(cats, knownCategories);
               if (!mergedCats.length) return;
-              const freshData = sanitize(cachedData, mergedCats);
-              setCategories(mergedCats);
-              setChannels(freshData);
-              setFiltered(freshData);
+              applyLiveChannelState(cachedData, mergedCats);
             })
             .catch(() => {});
           return;
@@ -95,11 +145,8 @@ export default function LiveTVScreen({ navigation }) {
         : (cachedData || []);
 
       const mergedCats = mergeCategories(cats, deriveCategoriesFromItems(all));
-      const data = sanitize(all, mergedCats);
+      const data = applyLiveChannelState(all, mergedCats);
 
-      setCategories(mergedCats);
-      setChannels(data);
-      setFiltered(data);
       setUsingCache(Boolean(cachedData && !(streamsResult.status === 'fulfilled' && streamsResult.value?.length)));
       if (data.length) await saveCache(server.url, user.username, 'live', 'all', data);
     } catch (e) {
@@ -112,7 +159,7 @@ export default function LiveTVScreen({ navigation }) {
   const filterByCategory = (catId) => {
     setSelectedCategory(catId);
     setSearch('');
-    setFiltered(!catId ? channels : channels.filter(c => String(c.category_id) === String(catId)));
+    setFiltered(filterChannelsByCategory(channels, catId));
   };
 
   const filterBySearch = (text) => {
@@ -181,7 +228,7 @@ export default function LiveTVScreen({ navigation }) {
       ? compactCategoryName(item.category_name, isTV ? 30 : 18)
       : cleanCategoryName(item.category_name || 'Todos');
     return (
-      <FocusableButton style={[styles.catBtn, selectedCategory === item.category_id && styles.catBtnActive]} onPress={() => filterByCategory(item.category_id)} hasTVPreferredFocus={index === 0 && isTV}>
+      <FocusableButton style={[styles.catBtn, selectedCategory === item.category_id && styles.catBtnActive]} onPress={() => filterByCategory(item.category_id)} hasTVPreferredFocus={isTV && selectedCategory === item.category_id}>
         <Text numberOfLines={1} style={[styles.catText, selectedCategory === item.category_id && styles.catTextActive]}>
           {label} <Text style={{ opacity: 0.55 }}>({count})</Text>
         </Text>

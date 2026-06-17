@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView,
@@ -17,6 +17,7 @@ export default function LoginScreen() {
   const [password, setPassword]         = useState('');
   const [loading, setLoading]           = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const passwordRef                     = useRef(null);
 
   const handleLogin = async () => {
     if (!username.trim() || !password.trim()) {
@@ -37,7 +38,7 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
@@ -68,6 +69,8 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => passwordRef.current?.focus?.()}
               autoFocus={!isTV}
             />
           </View>
@@ -76,6 +79,7 @@ export default function LoginScreen() {
           <Text style={styles.label}>Contraseña</Text>
           <View style={styles.inputWrapper}>
             <TextInput
+              ref={passwordRef}
               style={[styles.input, styles.inputWithIcon]}
               placeholder="contraseña"
               placeholderTextColor="#444"

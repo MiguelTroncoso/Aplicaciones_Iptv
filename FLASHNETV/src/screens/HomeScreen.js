@@ -14,7 +14,6 @@ import { getLiveStreams, getVodStreams, getSeries } from '../services/xtream';
 import { getCache, saveCache, pickHomeHighlights } from '../services/contentCache';
 import HeroCarousel from '../components/HeroCarousel';
 import ContentRow from '../components/ContentRow';
-import SportsRow from '../components/SportsRow';
 import FocusableButton from '../components/FocusableButton';
 import BrandLogo from '../components/BrandLogo';
 import Screensaver, { useScreensaver } from '../components/Screensaver';
@@ -456,9 +455,6 @@ export default function HomeScreen({ navigation }) {
         </View>
         )}
 
-        {/* ── DEPORTES ── */}
-        {!isTV && <SportsRow navigation={navigation} liveChannels={liveChannels} />}
-
         {/* ── TV EN VIVO RÁPIDO ── */}
         {!isTV && (
         <ContentRow
@@ -540,8 +536,6 @@ export default function HomeScreen({ navigation }) {
             onSeeAll={() => navigation.navigate('LiveTV')}
           />
         )}
-
-        {isTV && <SportsRow navigation={navigation} liveChannels={liveChannels} />}
 
         {/* ── ESTRENOS PELÍCULAS ── */}
         {movieEstrenos.length > 0 && (
