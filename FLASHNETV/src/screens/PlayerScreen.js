@@ -15,6 +15,7 @@ import {
   View, Text, StyleSheet,
   StatusBar, ActivityIndicator, Alert, AppState,
   Modal, ScrollView, Pressable, BackHandler, PanResponder,
+  FlatList, Image,
   NativeModules, Platform, TVEventHandler, TVFocusGuideView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -27,12 +28,13 @@ import Constants from 'expo-constants';
 import { useAuth } from '../context/AuthContext';
 import { useLibrary } from '../context/LibraryContext';
 import { useDownloads } from '../context/DownloadsContext';
-import { getStreamUrl } from '../services/xtream';
+import { getLiveCategories, getLiveStreams, getStreamUrl } from '../services/xtream';
 import { isTV } from '../utils/tv';
 import { colors } from '../theme';
 import FocusableButton from '../components/FocusableButton';
 import logger from '../utils/logger';
 import { resetInsideApp } from '../utils/navigation';
+import { cleanCategoryName } from '../utils/labels';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -207,6 +209,11 @@ export default function PlayerScreen({ route, navigation }) {
   const [externalSubtitles, setExternalSubtitles] = useState([]);
   const [externalSubtitleName, setExternalSubtitleName] = useState('');
   const [brightnessLevel, setBrightnessLevel] = useState(null);
+  const [showLiveGuide, setShowLiveGuide] = useState(false);
+  const [liveGuideLoading, setLiveGuideLoading] = useState(false);
+  const [liveGuideCategories, setLiveGuideCategories] = useState([]);
+  const [liveGuideChannels, setLiveGuideChannels] = useState([]);
+  const [liveGuideCategoryId, setLiveGuideCategoryId] = useState(stream?.category_id ?? null);
 
   const viewRef          = useRef(null);
   const lastSaveRef      = useRef(0);
@@ -291,12 +298,13 @@ export default function PlayerScreen({ route, navigation }) {
       isPlaying &&
       !pipActive &&
       !showTrackModal &&
+      !showLiveGuide &&
       !showNextEpPrompt &&
       !stallDetected &&
       playerStatus !== 'error' &&
       !showAccessModal
     );
-  }, [canPlay, playbackStarted, isPlaying, pipActive, showTrackModal, showNextEpPrompt, stallDetected, playerStatus, showAccessModal]);
+  }, [canPlay, playbackStarted, isPlaying, pipActive, showTrackModal, showLiveGuide, showNextEpPrompt, stallDetected, playerStatus, showAccessModal]);
 
   const startControlsTimer = useCallback(() => {
     clearControlsTimer();
@@ -312,14 +320,86 @@ export default function PlayerScreen({ route, navigation }) {
     startControlsTimer();
   }, [pipActive, startControlsTimer]);
 
+  const decorateLiveChannels = useCallback((items = [], categories = []) => {
+    const categoryMap = {};
+    categories.forEach(cat => {
+      if (cat?.category_id !== undefined && cat?.category_id !== null) {
+        categoryMap[String(cat.category_id)] = cat.category_name || cat.name || 'Sin categoria';
+      }
+    });
+    return items.map(item => ({
+      ...item,
+      category_name: item.category_name || categoryMap[String(item.category_id)] || 'Sin categoria',
+    }));
+  }, []);
+
+  const loadLiveGuide = useCallback(async () => {
+    if (type !== 'live' || liveGuideLoading) return;
+    try {
+      setLiveGuideLoading(true);
+      const [catsResult, streamsResult] = await Promise.allSettled([
+        getLiveCategories(server.url, user.username, user.password),
+        getLiveStreams(server.url, user.username, user.password),
+      ]);
+      const cats = catsResult.status === 'fulfilled' && Array.isArray(catsResult.value) ? catsResult.value : [];
+      const streams = streamsResult.status === 'fulfilled' && Array.isArray(streamsResult.value) ? streamsResult.value : [];
+      const channels = decorateLiveChannels(streams, cats);
+      const categoriesWithChannels = cats.filter(cat =>
+        channels.some(channel => String(channel.category_id) === String(cat.category_id))
+      );
+
+      setLiveGuideCategories(categoriesWithChannels);
+      setLiveGuideChannels(channels);
+      setLiveGuideCategoryId(prev => {
+        if (prev && categoriesWithChannels.some(cat => String(cat.category_id) === String(prev))) return prev;
+        if (stream?.category_id && categoriesWithChannels.some(cat => String(cat.category_id) === String(stream.category_id))) return stream.category_id;
+        return categoriesWithChannels[0]?.category_id ?? null;
+      });
+    } catch (error) {
+      logger.log('Live guide error:', error?.message || error);
+    } finally {
+      setLiveGuideLoading(false);
+    }
+  }, [decorateLiveChannels, liveGuideLoading, server.url, stream?.category_id, type, user.password, user.username]);
+
+  const openLiveGuide = useCallback(() => {
+    if (type !== 'live') return;
+    clearControlsTimer();
+    setShowControls(false);
+    setShowLiveGuide(true);
+    if (!liveGuideChannels.length) loadLiveGuide();
+  }, [clearControlsTimer, liveGuideChannels.length, loadLiveGuide, type]);
+
+  const closeLiveGuide = useCallback(() => {
+    setShowLiveGuide(false);
+    showControlsTemporarily();
+  }, [showControlsTemporarily]);
+
+  const playLiveGuideChannel = useCallback((channel) => {
+    if (!channel) return;
+    setShowLiveGuide(false);
+    navigation.replace('Player', {
+      stream: channel,
+      type: 'live',
+      returnRoute: returnRoute || 'LiveTV',
+      returnParams,
+    });
+  }, [navigation, returnParams, returnRoute]);
+
+  const liveGuideFilteredChannels = useMemo(() => {
+    if (!liveGuideCategoryId) return liveGuideChannels;
+    return liveGuideChannels.filter(channel => String(channel.category_id) === String(liveGuideCategoryId));
+  }, [liveGuideCategoryId, liveGuideChannels]);
+
   useEffect(() => {
     if (!isTV || !TVEventHandler?.addListener) return undefined;
 
     const sub = TVEventHandler.addListener((event) => {
-      const type = event?.eventType;
+      const eventType = event?.eventType;
       if (
         pipActive ||
         showTrackModal ||
+        showLiveGuide ||
         showNextEpPrompt ||
         playerStatus === 'error' ||
         !canPlay ||
@@ -328,7 +408,12 @@ export default function PlayerScreen({ route, navigation }) {
         return;
       }
 
-      if (['up', 'down', 'left', 'right', 'select', 'playPause', 'play', 'pause', 'rewind', 'fastForward', 'menu'].includes(type)) {
+      if (type === 'live' && ['select', 'menu'].includes(eventType)) {
+        openLiveGuide();
+        return;
+      }
+
+      if (['up', 'down', 'left', 'right', 'select', 'playPause', 'play', 'pause', 'rewind', 'fastForward', 'menu'].includes(eventType)) {
         showControlsTemporarily();
       }
     });
@@ -336,7 +421,7 @@ export default function PlayerScreen({ route, navigation }) {
     return () => {
       try { sub?.remove?.(); } catch (_) {}
     };
-  }, [canPlay, pipActive, playerStatus, screenLocked, showControlsTemporarily, showNextEpPrompt, showTrackModal]);
+  }, [canPlay, openLiveGuide, pipActive, playerStatus, screenLocked, showControlsTemporarily, showLiveGuide, showNextEpPrompt, showTrackModal, type]);
 
   useEffect(() => {
     if (playbackStarted && canAutoHideControls()) {
@@ -1441,12 +1526,12 @@ export default function PlayerScreen({ route, navigation }) {
             )}
 
             <FocusableButton
-              style={styles.playPauseBtn}
+              style={[styles.playPauseBtn, type === 'live' && isTV && styles.liveGuideBtn]}
               onFocus={showControlsTemporarily}
-              onPress={handlePlayPause}
-              hasTVPreferredFocus={isTV}
+              onPress={type === 'live' && isTV ? openLiveGuide : handlePlayPause}
+              hasTVPreferredFocus={false}
             >
-              <Text style={styles.playPauseText}>{isPlaying ? '❚❚' : '▶'}</Text>
+              <Text style={styles.playPauseText}>{type === 'live' && isTV ? '☰' : isPlaying ? '❚❚' : '▶'}</Text>
             </FocusableButton>
 
             {type !== 'live' && (
@@ -1627,6 +1712,112 @@ export default function PlayerScreen({ route, navigation }) {
           )}
         </Pressable>
       )}
+
+      <Modal visible={showLiveGuide} transparent animationType="fade" onRequestClose={closeLiveGuide}>
+        <Pressable
+          style={guideStyles.backdrop}
+          onPress={() => {
+            if (!isTV) closeLiveGuide();
+          }}
+          focusable={false}
+          accessible={false}
+        >
+          <TVFocusGuideView autoFocus trapFocusUp trapFocusDown trapFocusLeft trapFocusRight style={guideStyles.focusGuide}>
+            <Pressable style={guideStyles.shell} onPress={() => {}} focusable={false} accessible={false}>
+              <View style={guideStyles.sideRail}>
+                <Text style={guideStyles.railTitle}>TV</Text>
+                <FocusableButton style={guideStyles.railAction} onPress={closeLiveGuide}>
+                  <Text style={guideStyles.railActionText}>Volver</Text>
+                </FocusableButton>
+                <FocusableButton style={guideStyles.railAction} onPress={() => {
+                  setShowLiveGuide(false);
+                  navigation.navigate('MainTabs', { screen: 'Search' });
+                }}>
+                  <Text style={guideStyles.railActionText}>Buscar</Text>
+                </FocusableButton>
+                <FocusableButton style={guideStyles.railAction} onPress={handleFavorite}>
+                  <Text style={guideStyles.railActionText}>{favoriteActive ? 'Quitar fav' : 'Favorito'}</Text>
+                </FocusableButton>
+              </View>
+
+              <View style={guideStyles.categoryPanel}>
+                <Text style={guideStyles.panelTitle}>Categorias</Text>
+                {liveGuideLoading && !liveGuideCategories.length ? (
+                  <View style={guideStyles.loadingBox}>
+                    <ActivityIndicator color={colors.accent} size="small" />
+                    <Text style={guideStyles.loadingText}>Cargando</Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={liveGuideCategories}
+                    keyExtractor={(item, index) => `guide-cat-${item.category_id || index}`}
+                    showsVerticalScrollIndicator={false}
+                    renderItem={({ item, index }) => {
+                      const active = String(item.category_id) === String(liveGuideCategoryId);
+                      return (
+                        <FocusableButton
+                          style={[guideStyles.categoryBtn, active && guideStyles.categoryBtnActive]}
+                          focusedStyle={guideStyles.focused}
+                          hasTVPreferredFocus={isTV && index === 0 && !liveGuideCategoryId}
+                          onPress={() => setLiveGuideCategoryId(item.category_id)}
+                        >
+                          <Text style={[guideStyles.categoryText, active && guideStyles.activeText]} numberOfLines={1}>
+                            {cleanCategoryName(item.category_name || 'Categoria')}
+                          </Text>
+                        </FocusableButton>
+                      );
+                    }}
+                  />
+                )}
+              </View>
+
+              <View style={guideStyles.channelPanel}>
+                <View style={guideStyles.channelHeader}>
+                  <Text style={guideStyles.panelTitle}>Lista de canales</Text>
+                  <Text style={guideStyles.counterText}>{liveGuideFilteredChannels.length}</Text>
+                </View>
+                <FlatList
+                  data={liveGuideFilteredChannels}
+                  keyExtractor={(item, index) => `guide-channel-${item.stream_id || item.name || index}`}
+                  showsVerticalScrollIndicator={false}
+                  ListEmptyComponent={
+                    <View style={guideStyles.emptyBox}>
+                      <Text style={guideStyles.emptyText}>Sin canales en esta categoria</Text>
+                    </View>
+                  }
+                  renderItem={({ item }) => {
+                    const active = String(item.stream_id || item.name) === String(stream?.stream_id || stream?.name);
+                    return (
+                      <FocusableButton
+                        style={[guideStyles.channelRow, active && guideStyles.channelRowActive]}
+                        focusedStyle={guideStyles.focused}
+                        onPress={() => playLiveGuideChannel(item)}
+                      >
+                        {item.stream_icon ? (
+                          <Image source={{ uri: item.stream_icon }} style={guideStyles.channelLogo} resizeMode="contain" />
+                        ) : (
+                          <View style={guideStyles.channelLogoFallback}>
+                            <Text style={guideStyles.channelLogoText}>{String(item.name || '?').charAt(0)}</Text>
+                          </View>
+                        )}
+                        <View style={guideStyles.channelInfo}>
+                          <Text style={[guideStyles.channelName, active && guideStyles.activeText]} numberOfLines={1}>
+                            {active ? '▶ ' : ''}{cleanName(item.name || '')}
+                          </Text>
+                          <Text style={guideStyles.channelMeta} numberOfLines={1}>
+                            {cleanCategoryName(item.category_name || 'En vivo')}
+                          </Text>
+                        </View>
+                        <Text style={guideStyles.channelArrow}>›</Text>
+                      </FocusableButton>
+                    );
+                  }}
+                />
+              </View>
+            </Pressable>
+          </TVFocusGuideView>
+        </Pressable>
+      </Modal>
 
       {/* Modal audio/subtítulos */}
       <Modal visible={showTrackModal} transparent animationType="fade" onRequestClose={closeTrackModal}>
@@ -1855,6 +2046,11 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
   },
+  liveGuideBtn: {
+    borderRadius: 16,
+    backgroundColor: 'rgba(31,125,255,0.72)',
+    borderColor: 'rgba(255,255,255,0.48)',
+  },
   playPauseText: { color: colors.white, fontSize: 30, fontWeight: 'bold', marginLeft: 2 },
   seekBtn: {
     minWidth: 72, height: 50, borderRadius: 25,
@@ -2002,6 +2198,114 @@ const styles = StyleSheet.create({
   ratingEmoji: { fontSize: 36 },
   ratingLabel: { color: '#fff', fontSize: 13, fontWeight: '600' },
   ratingSkip: { color: 'rgba(255,255,255,0.4)', fontSize: 12 },
+});
+
+const guideStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.26)',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingVertical: isTV ? 30 : 18,
+    paddingLeft: isTV ? 54 : 12,
+    paddingRight: isTV ? 20 : 12,
+  },
+  focusGuide: { width: '100%' },
+  shell: {
+    width: isTV ? '64%' : '100%',
+    minWidth: isTV ? 690 : 0,
+    maxWidth: isTV ? 780 : 620,
+    height: isTV ? '88%' : '82%',
+    flexDirection: 'row',
+    backgroundColor: 'rgba(11,16,28,0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  sideRail: {
+    width: isTV ? 150 : 84,
+    backgroundColor: 'rgba(5,7,11,0.62)',
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255,255,255,0.12)',
+    padding: isTV ? 14 : 10,
+    gap: isTV ? 12 : 8,
+  },
+  railTitle: { color: colors.white, fontSize: isTV ? 24 : 18, fontWeight: '900', marginBottom: 8 },
+  railAction: {
+    minHeight: isTV ? 42 : 36,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  railActionText: { color: colors.white, fontSize: isTV ? 13 : 11, fontWeight: '800' },
+  categoryPanel: {
+    width: isTV ? 220 : 150,
+    backgroundColor: 'rgba(17,25,42,0.78)',
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255,255,255,0.12)',
+    padding: isTV ? 12 : 8,
+  },
+  channelPanel: { flex: 1, padding: isTV ? 12 : 8 },
+  channelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: isTV ? 8 : 6,
+  },
+  panelTitle: { color: colors.white, fontSize: isTV ? 14 : 12, fontWeight: '900', marginBottom: isTV ? 8 : 6 },
+  counterText: { color: colors.textSecondary, fontSize: isTV ? 12 : 10, fontWeight: '800' },
+  categoryBtn: {
+    minHeight: isTV ? 42 : 34,
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    marginBottom: 4,
+  },
+  categoryBtnActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.accent,
+  },
+  categoryText: { color: colors.textSecondary, fontSize: isTV ? 13 : 11, fontWeight: '800' },
+  activeText: { color: colors.white },
+  focused: {
+    borderColor: colors.white,
+    backgroundColor: 'rgba(31,125,255,0.38)',
+  },
+  channelRow: {
+    minHeight: isTV ? 54 : 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: isTV ? 11 : 8,
+    paddingHorizontal: isTV ? 10 : 8,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  channelRowActive: { backgroundColor: 'rgba(31,125,255,0.20)' },
+  channelLogo: { width: isTV ? 44 : 34, height: isTV ? 34 : 28, backgroundColor: 'rgba(0,0,0,0.28)' },
+  channelLogoFallback: {
+    width: isTV ? 44 : 34,
+    height: isTV ? 34 : 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  channelLogoText: { color: colors.white, fontSize: isTV ? 15 : 12, fontWeight: '900' },
+  channelInfo: { flex: 1 },
+  channelName: { color: colors.white, fontSize: isTV ? 16 : 13, fontWeight: '900' },
+  channelMeta: { color: colors.textSecondary, fontSize: isTV ? 11 : 10, marginTop: 3 },
+  channelArrow: { color: colors.textSecondary, fontSize: isTV ? 26 : 20, fontWeight: '300' },
+  loadingBox: { paddingVertical: 24, alignItems: 'center', gap: 8 },
+  loadingText: { color: colors.textSecondary, fontSize: isTV ? 12 : 10 },
+  emptyBox: { padding: 18 },
+  emptyText: { color: colors.textSecondary, fontSize: isTV ? 13 : 11 },
 });
 
 const trackStyles = StyleSheet.create({

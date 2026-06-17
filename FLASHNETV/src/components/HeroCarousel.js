@@ -136,7 +136,7 @@ export default function HeroCarousel({ items = [], types = [], onPlay, onInfo })
 
           <View style={styles.heroButtons}>
             <FocusableButton
-              hasTVPreferredFocus={isTV}
+              hasTVPreferredFocus={false}
               style={styles.playBtn}
               focusedStyle={styles.playBtnFocused}
               onPress={() => onPlay && onPlay(item, type)}

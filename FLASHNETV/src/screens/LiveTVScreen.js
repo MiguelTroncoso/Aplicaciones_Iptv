@@ -228,7 +228,7 @@ export default function LiveTVScreen({ navigation }) {
       ? compactCategoryName(item.category_name, isTV ? 30 : 18)
       : cleanCategoryName(item.category_name || 'Todos');
     return (
-      <FocusableButton style={[styles.catBtn, selectedCategory === item.category_id && styles.catBtnActive]} onPress={() => filterByCategory(item.category_id)} hasTVPreferredFocus={isTV && selectedCategory === item.category_id}>
+      <FocusableButton style={[styles.catBtn, selectedCategory === item.category_id && styles.catBtnActive]} onPress={() => filterByCategory(item.category_id)} hasTVPreferredFocus={false}>
         <Text numberOfLines={1} style={[styles.catText, selectedCategory === item.category_id && styles.catTextActive]}>
           {label} <Text style={{ opacity: 0.55 }}>({count})</Text>
         </Text>

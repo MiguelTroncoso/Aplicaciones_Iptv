@@ -166,7 +166,7 @@ export default function MoviesScreen({ navigation }) {
       <FocusableButton
         style={[styles.catBtn, active && styles.catBtnActive]}
         focusedStyle={styles.catBtnFocused}
-        hasTVPreferredFocus={isTV && item.category_id === null}
+        hasTVPreferredFocus={false}
         onPress={() => {
           setSelectedCat(active ? null : item.category_id);
           setSearch('');

@@ -416,7 +416,28 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── HERO CARRUSEL ── */}
-        {heroItems.length > 0 ? (
+        {isTV ? (
+          <View style={styles.tvShowcase}>
+            {renderTVHomeMenu()}
+            <View style={styles.tvShowcaseHero}>
+              {heroItems.length > 0 ? (
+                <HeroCarousel
+                  items={heroItems}
+                  types={heroTypes}
+                  onPlay={handleHeroPlay}
+                  onInfo={handleHeroInfo}
+                />
+              ) : movies.length > 0 ? (
+                <HeroCarousel
+                  items={movies.slice(0, 6)}
+                  types={movies.slice(0, 6).map(() => 'movie')}
+                  onPlay={handleHeroPlay}
+                  onInfo={handleHeroInfo}
+                />
+              ) : null}
+            </View>
+          </View>
+        ) : heroItems.length > 0 ? (
           <HeroCarousel
             items={heroItems}
             types={heroTypes}
@@ -431,8 +452,6 @@ export default function HomeScreen({ navigation }) {
             onInfo={handleHeroInfo}
           />
         ) : null}
-
-        {renderTVHomeMenu()}
 
         {/* ── ACCESOS RÁPIDOS (complementan los tabs) ── */}
         {!isTV && (
@@ -693,52 +712,59 @@ const styles = StyleSheet.create({
   logoutBtn: { borderWidth: 1, borderColor: colors.accentWarm || colors.primary, paddingHorizontal: isTV ? 20 : 10, paddingVertical: isTV ? 10 : 5, borderRadius: 8 },
   logoutText: { color: colors.textSecondary, fontSize: isTV ? 17 : 11, fontWeight: '800' },
 
-  tvMenuBand: {
+  tvShowcase: {
+    flexDirection: 'row',
     paddingHorizontal: layout.horizontalPadding,
-    paddingTop: 24,
-    paddingBottom: 18,
-    backgroundColor: colors.background,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(31,125,255,0.22)',
+    paddingTop: 18,
+    paddingBottom: 8,
     gap: 16,
+    backgroundColor: colors.background,
+  },
+  tvShowcaseHero: {
+    flex: 1,
+    minWidth: 0,
+  },
+  tvMenuBand: {
+    width: 172,
+    flexShrink: 0,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    backgroundColor: 'rgba(5,7,11,0.72)',
+    borderRightWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    gap: 14,
   },
   tvMenuHeader: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 18,
+    gap: 8,
   },
   tvMenuTitle: {
     color: colors.textSecondary,
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: 0,
   },
   tvMenuGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   tvMenuButton: {
-    minWidth: 150,
-    minHeight: 46,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: colors.surfaceElevated,
-    alignItems: 'center',
+    minHeight: 42,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
   tvMenuButtonFocused: {
     borderColor: colors.white,
-    backgroundColor: 'rgba(31,125,255,0.34)',
+    backgroundColor: 'rgba(31,125,255,0.52)',
   },
   tvMenuButtonText: {
     color: colors.white,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '900',
   },
 

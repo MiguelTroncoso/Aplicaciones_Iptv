@@ -32,7 +32,7 @@ export default function TVTopNav({ navigation, current = 'Home' }) {
           return (
             <FocusableButton
               key={item.route}
-              hasTVPreferredFocus={index === 0 && current === 'Home'}
+              hasTVPreferredFocus={false}
               style={[styles.navBtn, active && styles.navBtnActive]}
               focusedStyle={styles.navBtnFocused}
               onPress={() => go(item.route)}
