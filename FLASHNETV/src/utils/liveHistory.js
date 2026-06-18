@@ -29,3 +29,20 @@ export const mergeLastLiveChannel = (lastChannel, channels = []) => {
   );
   return fresh || lastChannel;
 };
+
+export const sortChannelsForTV = (items = []) =>
+  [...items].sort((a, b) => {
+    const leftName = String(a?.name || '').trim();
+    const rightName = String(b?.name || '').trim();
+    const leftStartsWithNumber = /^\d/.test(leftName);
+    const rightStartsWithNumber = /^\d/.test(rightName);
+
+    if (leftStartsWithNumber !== rightStartsWithNumber) {
+      return leftStartsWithNumber ? 1 : -1;
+    }
+
+    return leftName.localeCompare(rightName, 'es', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  });

@@ -14,7 +14,7 @@ import { isTV, layout } from '../utils/tv';
 import logger from '../utils/logger';
 import { safeBack, useFilterAwareHardwareBack } from '../utils/navigation';
 import { cleanCategoryName, compactCategoryName } from '../utils/labels';
-import { loadLastLiveChannel, mergeLastLiveChannel } from '../utils/liveHistory';
+import { loadLastLiveChannel, mergeLastLiveChannel, sortChannelsForTV } from '../utils/liveHistory';
 
 const PRIORITY_LIVE_CATEGORY_GROUPS = [
   ['mundial 2026', 'world cup 2026', 'fifa world cup 2026', 'copa mundial 2026'],
@@ -110,7 +110,7 @@ export default function LiveTVScreen({ navigation }) {
 
   const applyLiveChannelState = (items = [], cats = [], preferredCategoryId) => {
     const sortedCats = sortLiveCategories(cats);
-    const data = sanitize(items, sortedCats);
+    const data = sortChannelsForTV(sanitize(items, sortedCats));
     const nextSelectedCategory = preferredCategoryId !== undefined
       ? preferredCategoryId
       : getPreferredLiveCategoryId(sortedCats, data);

@@ -6,8 +6,7 @@ import { isTV } from '../utils/tv';
  * FocusableButton
  *
  * En Android TV / Fire TV dejamos que react-native-tvos maneje el D-pad de forma
- * nativa. El componente pinta un foco local estilo premium: escala suave y glow,
- * sin cursor global flotante.
+ * nativa. El foco evita transform/sombras pesadas para responder rapido en TV Box.
  */
 export default function FocusableButton({
   children,
@@ -74,14 +73,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(50, 197, 255, 0.08)',
   },
   tvFocused: {
-    borderColor: '#F6B63F',
-    backgroundColor: 'rgba(246, 182, 63, 0.12)',
-    transform: [{ scale: 1.075 }],
-    shadowColor: '#F6B63F',
-    shadowOpacity: 0.42,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 24,
-    zIndex: 50,
+    borderColor: '#38BDF8',
+    backgroundColor: 'rgba(31, 125, 255, 0.18)',
+    zIndex: 10,
   },
 });

@@ -23,7 +23,7 @@ import versionInfo from '../../version.json';
 import logger from '../utils/logger';
 import { getRecentlyAdded } from '../utils/contentFilters';
 import { getResumePositionMillis, promptResumePlayback, shouldAskResume } from '../utils/resumePlayback';
-import { loadLastLiveChannel, mergeLastLiveChannel } from '../utils/liveHistory';
+import { loadLastLiveChannel, mergeLastLiveChannel, sortChannelsForTV } from '../utils/liveHistory';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -79,6 +79,8 @@ export default function HomeScreen({ navigation }) {
   const [lastLiveChannel, setLastLiveChannel] = useState(null);
   const [movies, setMovies]         = useState([]);
   const [series, setSeries]         = useState([]);
+  const [tvFocusedSection, setTvFocusedSection] = useState('TV');
+  const [tvFocusedChannel, setTvFocusedChannel] = useState(null);
 
   useEffect(() => {
     loadContent();
@@ -291,7 +293,7 @@ export default function HomeScreen({ navigation }) {
   const playWithResumePrompt = useCallback((stream, type = 'movie', options = {}) => {
     const { resumeItem: forcedResumeItem, ...playerOptions } = options;
     if (type === 'live') {
-      navigation.navigate('Player', { stream, type, returnRoute: 'MainTabs', ...playerOptions });
+      navigation.navigate('Player', { stream, type, returnRoute: 'LiveTV', ...playerOptions });
       return;
     }
 
@@ -361,23 +363,22 @@ export default function HomeScreen({ navigation }) {
 
   const tvSortedChannels = useMemo(() => {
     const pool = allLiveChannels.length ? allLiveChannels : liveChannels;
-    return [...pool].sort((a, b) =>
-      String(a?.name || '').localeCompare(String(b?.name || ''), 'es', { sensitivity: 'base' })
-    );
+    return sortChannelsForTV(pool);
   }, [allLiveChannels, liveChannels]);
 
   const tvPreviewChannel = useMemo(
     () => mergeLastLiveChannel(lastLiveChannel, tvSortedChannels),
     [lastLiveChannel, tvSortedChannels]
   );
+  const tvDisplayChannel = tvFocusedChannel || tvPreviewChannel;
 
-  const openLiveFromHome = useCallback((channel = tvPreviewChannel) => {
+  const openLiveFromHome = useCallback((channel = tvDisplayChannel) => {
     if (channel) {
-      navigation.navigate('Player', { stream: channel, type: 'live', returnRoute: 'MainTabs' });
+      navigation.navigate('Player', { stream: channel, type: 'live', returnRoute: 'LiveTV' });
       return;
     }
     navigation.navigate('LiveTV');
-  }, [navigation, tvPreviewChannel]);
+  }, [navigation, tvDisplayChannel]);
 
   const renderTVHomeMenu = () => {
     if (!isTV) return null;
@@ -387,20 +388,24 @@ export default function HomeScreen({ navigation }) {
           <BrandLogo variant="nav" />
         </View>
         <View style={styles.tvMenuGrid}>
-          {TV_HOME_MENU.map((item, index) => (
-            <FocusableButton
-              key={`${item.screen}-${item.label}`}
-              style={[styles.tvMenuButton, index === 0 && styles.tvMenuButtonActive, index > 1 && styles.tvMenuButtonMuted]}
-              focusedStyle={styles.tvMenuButtonFocused}
-              onPress={() => {
-                if (item.screen === 'LiveTV') openLiveFromHome();
-                else navigation.navigate(item.screen);
-              }}
-            >
-              <Text style={[styles.tvMenuButtonIcon, index === 0 && styles.tvMenuButtonIconActive]}>{item.icon}</Text>
-              <Text style={[styles.tvMenuButtonText, index === 0 && styles.tvMenuButtonTextActive]} numberOfLines={1}>{item.label}</Text>
-            </FocusableButton>
-          ))}
+          {TV_HOME_MENU.map((item, index) => {
+            const active = tvFocusedSection === item.label;
+            return (
+              <FocusableButton
+                key={`${item.screen}-${item.label}`}
+                style={[styles.tvMenuButton, active && styles.tvMenuButtonActive, !active && index > 1 && styles.tvMenuButtonMuted]}
+                focusedStyle={styles.tvMenuButtonFocused}
+                onFocus={() => setTvFocusedSection(item.label)}
+                onPress={() => {
+                  if (item.screen === 'LiveTV') openLiveFromHome();
+                  else navigation.navigate(item.screen);
+                }}
+              >
+                <Text style={[styles.tvMenuButtonIcon, active && styles.tvMenuButtonIconActive]}>{item.icon}</Text>
+                <Text style={[styles.tvMenuButtonText, active && styles.tvMenuButtonTextActive]} numberOfLines={1}>{item.label}</Text>
+              </FocusableButton>
+            );
+          })}
         </View>
       </View>
     );
@@ -460,13 +465,13 @@ export default function HomeScreen({ navigation }) {
               onPress={() => openLiveFromHome()}
             >
               <View style={styles.tvLivePreviewImage}>
-                {tvPreviewChannel?.stream_icon ? (
-                  <Image source={{ uri: tvPreviewChannel.stream_icon }} style={styles.tvLiveLogo} resizeMode="contain" />
+                {tvDisplayChannel?.stream_icon ? (
+                  <Image source={{ uri: tvDisplayChannel.stream_icon }} style={styles.tvLiveLogo} resizeMode="contain" />
                 ) : (
                   <Text style={styles.tvLiveFallback}>TV</Text>
                 )}
                 <View style={styles.tvLiveShade} />
-                <Text style={styles.tvLiveName} numberOfLines={1}>{tvPreviewChannel?.name || 'TV en vivo'}</Text>
+                <Text style={styles.tvLiveName} numberOfLines={1}>{tvDisplayChannel?.name || 'TV en vivo'}</Text>
                 <Text style={styles.tvLiveExpand}>⛶</Text>
               </View>
             </FocusableButton>
@@ -478,6 +483,7 @@ export default function HomeScreen({ navigation }) {
                   key={`tv-home-${channel.stream_id || channel.name}`}
                   style={styles.tvRailChannel}
                   focusedStyle={styles.tvRailChannelFocused}
+                  onFocus={() => setTvFocusedChannel(channel)}
                   onPress={() => openLiveFromHome(channel)}
                 >
                   {channel.stream_icon ? (
@@ -539,7 +545,7 @@ export default function HomeScreen({ navigation }) {
           showFavoriteButton
           isFavorite={isFavorite}
           onFavoritePress={toggleFavorite}
-          onPress={(item) => navigation.navigate('Player', { stream: item, type: 'live', returnRoute: 'MainTabs' })}
+          onPress={(item) => navigation.navigate('Player', { stream: item, type: 'live', returnRoute: 'LiveTV' })}
           onSeeAll={() => navigation.navigate('LiveTV')}
         />
         )}
@@ -606,7 +612,7 @@ export default function HomeScreen({ navigation }) {
             showFavoriteButton
             isFavorite={isFavorite}
             onFavoritePress={toggleFavorite}
-            onPress={(item) => navigation.navigate('Player', { stream: item, type: 'live', returnRoute: 'MainTabs' })}
+            onPress={(item) => navigation.navigate('Player', { stream: item, type: 'live', returnRoute: 'LiveTV' })}
             onSeeAll={() => navigation.navigate('LiveTV')}
           />
         )}

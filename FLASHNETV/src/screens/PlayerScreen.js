@@ -35,7 +35,7 @@ import FocusableButton from '../components/FocusableButton';
 import logger from '../utils/logger';
 import { resetInsideApp } from '../utils/navigation';
 import { cleanCategoryName } from '../utils/labels';
-import { saveLastLiveChannel } from '../utils/liveHistory';
+import { saveLastLiveChannel, sortChannelsForTV } from '../utils/liveHistory';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -215,6 +215,7 @@ export default function PlayerScreen({ route, navigation }) {
   const [liveGuideCategories, setLiveGuideCategories] = useState([]);
   const [liveGuideChannels, setLiveGuideChannels] = useState([]);
   const [liveGuideCategoryId, setLiveGuideCategoryId] = useState(stream?.category_id ?? null);
+  const liveGuidePrefetchedRef = useRef(false);
 
   const viewRef          = useRef(null);
   const lastSaveRef      = useRef(0);
@@ -348,7 +349,7 @@ export default function PlayerScreen({ route, navigation }) {
       ]);
       const cats = catsResult.status === 'fulfilled' && Array.isArray(catsResult.value) ? catsResult.value : [];
       const streams = streamsResult.status === 'fulfilled' && Array.isArray(streamsResult.value) ? streamsResult.value : [];
-      const channels = decorateLiveChannels(streams, cats);
+      const channels = sortChannelsForTV(decorateLiveChannels(streams, cats));
       const categoriesWithChannels = cats.filter(cat =>
         channels.some(channel => String(channel.category_id) === String(cat.category_id))
       );
@@ -366,6 +367,15 @@ export default function PlayerScreen({ route, navigation }) {
       setLiveGuideLoading(false);
     }
   }, [decorateLiveChannels, liveGuideLoading, server.url, stream?.category_id, type, user.password, user.username]);
+
+  useEffect(() => {
+    if (type !== 'live' || liveGuidePrefetchedRef.current) return undefined;
+    liveGuidePrefetchedRef.current = true;
+    const timer = setTimeout(() => {
+      loadLiveGuide();
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [loadLiveGuide, type]);
 
   const openLiveGuide = useCallback(() => {
     if (type !== 'live') return;
@@ -386,10 +396,10 @@ export default function PlayerScreen({ route, navigation }) {
     navigation.replace('Player', {
       stream: channel,
       type: 'live',
-      returnRoute: returnRoute || 'LiveTV',
+      returnRoute: 'LiveTV',
       returnParams,
     });
-  }, [navigation, returnParams, returnRoute]);
+  }, [navigation, returnParams]);
 
   const liveGuideFilteredChannels = useMemo(() => {
     if (!liveGuideCategoryId) return liveGuideChannels;
@@ -1719,16 +1729,9 @@ export default function PlayerScreen({ route, navigation }) {
       )}
 
       <Modal visible={showLiveGuide} transparent animationType="fade" onRequestClose={closeLiveGuide}>
-        <Pressable
-          style={guideStyles.backdrop}
-          onPress={() => {
-            if (!isTV) closeLiveGuide();
-          }}
-          focusable={false}
-          accessible={false}
-        >
+        <View style={guideStyles.backdrop}>
           <TVFocusGuideView autoFocus trapFocusUp trapFocusDown trapFocusLeft trapFocusRight style={guideStyles.focusGuide}>
-            <Pressable style={guideStyles.shell} onPress={() => {}} focusable={false} accessible={false}>
+            <View style={guideStyles.shell}>
               <View style={guideStyles.sideRail}>
                 <Text style={guideStyles.railTitle}>TV</Text>
                 <FocusableButton style={guideStyles.railAction} onPress={closeLiveGuide}>
@@ -1763,7 +1766,8 @@ export default function PlayerScreen({ route, navigation }) {
                         <FocusableButton
                           style={[guideStyles.categoryBtn, active && guideStyles.categoryBtnActive]}
                           focusedStyle={guideStyles.focused}
-                          hasTVPreferredFocus={isTV && index === 0 && !liveGuideCategoryId}
+                          hasTVPreferredFocus={isTV && (active || (index === 0 && !liveGuideCategoryId))}
+                          onFocus={() => setLiveGuideCategoryId(item.category_id)}
                           onPress={() => setLiveGuideCategoryId(item.category_id)}
                         >
                           <Text style={[guideStyles.categoryText, active && guideStyles.activeText]} numberOfLines={1}>
@@ -1785,6 +1789,10 @@ export default function PlayerScreen({ route, navigation }) {
                   data={liveGuideFilteredChannels}
                   keyExtractor={(item, index) => `guide-channel-${item.stream_id || item.name || index}`}
                   showsVerticalScrollIndicator={false}
+                  initialNumToRender={10}
+                  maxToRenderPerBatch={8}
+                  windowSize={5}
+                  removeClippedSubviews
                   ListEmptyComponent={
                     <View style={guideStyles.emptyBox}>
                       <Text style={guideStyles.emptyText}>Sin canales en esta categoria</Text>
@@ -1819,9 +1827,9 @@ export default function PlayerScreen({ route, navigation }) {
                   }}
                 />
               </View>
-            </Pressable>
+            </View>
           </TVFocusGuideView>
-        </Pressable>
+        </View>
       </Modal>
 
       {/* Modal audio/subtítulos */}
