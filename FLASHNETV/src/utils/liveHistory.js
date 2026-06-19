@@ -30,10 +30,17 @@ export const mergeLastLiveChannel = (lastChannel, channels = []) => {
   return fresh || lastChannel;
 };
 
+const normalizeChannelSortName = (value = '') =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/^[^a-zA-Z0-9]+/g, '')
+    .trim();
+
 export const sortChannelsForTV = (items = []) =>
   [...items].sort((a, b) => {
-    const leftName = String(a?.name || '').trim();
-    const rightName = String(b?.name || '').trim();
+    const leftName = normalizeChannelSortName(a?.name);
+    const rightName = normalizeChannelSortName(b?.name);
     const leftStartsWithNumber = /^\d/.test(leftName);
     const rightStartsWithNumber = /^\d/.test(rightName);
 

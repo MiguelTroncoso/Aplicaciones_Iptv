@@ -4,6 +4,7 @@ import {
   ScrollView, ActivityIndicator, RefreshControl, Image,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useLibrary } from '../context/LibraryContext';
@@ -11,7 +12,7 @@ import { useDownloads } from '../context/DownloadsContext';
 import { colors } from '../theme';
 import { checkForUpdates } from '../services/updater';
 import { checkForNewContent, areNotificationsEnabled } from '../services/notifications';
-import { getLiveStreams, getVodStreams, getSeries } from '../services/xtream';
+import { getLiveStreams, getVodStreams, getSeries, getStreamUrl } from '../services/xtream';
 import { getCache, saveCache, pickHomeHighlights } from '../services/contentCache';
 import HeroCarousel from '../components/HeroCarousel';
 import ContentRow from '../components/ContentRow';
@@ -28,6 +29,20 @@ import { loadLastLiveChannel, mergeLastLiveChannel, sortChannelsForTV } from '..
 const CURRENT_YEAR = new Date().getFullYear();
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+const formatClockTime = () =>
+  new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+const getPreviewContentType = (url = '') => {
+  const value = String(url).toLowerCase();
+  if (value.includes('.m3u8')) return 'hls';
+  if (value.includes('.mpd')) return 'dash';
+  return 'auto';
+};
 
 const TV_HOME_MENU = [
   { label: 'TV', screen: 'LiveTV', icon: '▣' },
@@ -80,7 +95,11 @@ export default function HomeScreen({ navigation }) {
   const [movies, setMovies]         = useState([]);
   const [series, setSeries]         = useState([]);
   const [tvFocusedSection, setTvFocusedSection] = useState('TV');
-  const [tvFocusedChannel, setTvFocusedChannel] = useState(null);
+  const [clockText, setClockText] = useState(formatClockTime());
+  const tvPreviewPlayer = useVideoPlayer(null, (player) => {
+    player.muted = true;
+    player.volume = 0;
+  });
 
   useEffect(() => {
     loadContent();
@@ -107,6 +126,12 @@ export default function HomeScreen({ navigation }) {
   useFocusEffect(useCallback(() => {
     if (isTV) loadLastLiveChannel().then(setLastLiveChannel).catch(() => {});
   }, []));
+
+  useEffect(() => {
+    if (!isTV) return undefined;
+    const timer = setInterval(() => setClockText(formatClockTime()), 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   // ─── Secciones derivadas ──────────────────────────────────────────────────
 
@@ -370,7 +395,44 @@ export default function HomeScreen({ navigation }) {
     () => mergeLastLiveChannel(lastLiveChannel, tvSortedChannels),
     [lastLiveChannel, tvSortedChannels]
   );
-  const tvDisplayChannel = tvFocusedChannel || tvPreviewChannel;
+  const tvDisplayChannel = tvPreviewChannel;
+
+  const tvPreviewUrl = useMemo(() => {
+    const streamId = tvDisplayChannel?.stream_id || tvDisplayChannel?.id;
+    if (!isTV || !streamId || !server?.url || !user?.username || !user?.password) return null;
+    return getStreamUrl(server.url, user.username, user.password, streamId, 'live', 'ts');
+  }, [server?.url, tvDisplayChannel, user?.password, user?.username]);
+
+  useEffect(() => {
+    if (!isTV) return undefined;
+
+    if (!tvPreviewUrl) {
+      try { tvPreviewPlayer.replace(null); } catch (_) {}
+      return undefined;
+    }
+
+    const source = { uri: tvPreviewUrl, contentType: getPreviewContentType(tvPreviewUrl) };
+    try {
+      tvPreviewPlayer.muted = true;
+      tvPreviewPlayer.volume = 0;
+      if (typeof tvPreviewPlayer.replaceAsync === 'function') {
+        tvPreviewPlayer.replaceAsync(source).then(() => tvPreviewPlayer.play()).catch(() => {});
+      } else {
+        tvPreviewPlayer.replace(source);
+        tvPreviewPlayer.play();
+      }
+    } catch (_) {}
+
+    return undefined;
+  }, [tvPreviewPlayer, tvPreviewUrl]);
+
+  useFocusEffect(useCallback(() => {
+    if (!isTV || !tvPreviewUrl) return undefined;
+    try { tvPreviewPlayer.play(); } catch (_) {}
+    return () => {
+      try { tvPreviewPlayer.pause(); } catch (_) {}
+    };
+  }, [tvPreviewPlayer, tvPreviewUrl]));
 
   const openLiveFromHome = useCallback((channel = tvDisplayChannel) => {
     if (channel) {
@@ -425,14 +487,16 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView
         style={styles.container}
+        contentContainerStyle={isTV ? styles.tvScrollContent : undefined}
+        scrollEnabled={!isTV}
         showsVerticalScrollIndicator={false}
-        refreshControl={
+        refreshControl={!isTV ? (
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => loadContent(true)}
             tintColor={colors.accent}
           />
-        }
+        ) : undefined}
       >
         {/* ── HEADER ── */}
         {!isTV && (
@@ -457,15 +521,43 @@ export default function HomeScreen({ navigation }) {
         {/* ── HERO CARRUSEL ── */}
         {isTV ? (
           <View style={styles.tvDashboard}>
+            <View style={styles.tvStatusBar}>
+              <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => navigation.navigate('Search')}>
+                <Text style={styles.tvStatusText}>Buscar</Text>
+              </FocusableButton>
+              <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => navigation.navigate('LiveTV')}>
+                <Text style={styles.tvStatusText}>Filtro</Text>
+              </FocusableButton>
+              <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => openLiveFromHome()}>
+                <Text style={styles.tvStatusText}>Ultimo</Text>
+              </FocusableButton>
+              <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => navigation.navigate('Account')}>
+                <Text style={styles.tvStatusText}>Cuenta</Text>
+              </FocusableButton>
+              <Text style={styles.tvStatusIcon}>Aviso</Text>
+              <Text style={styles.tvStatusDivider}>|</Text>
+              <Text style={styles.tvStatusIcon}>Wi-Fi</Text>
+              <Text style={styles.tvClockText}>{clockText}</Text>
+            </View>
             {renderTVHomeMenu()}
 
             <FocusableButton
               style={styles.tvLivePreview}
               focusedStyle={styles.tvLivePreviewFocused}
+              hasTVPreferredFocus={isTV}
               onPress={() => openLiveFromHome()}
             >
               <View style={styles.tvLivePreviewImage}>
-                {tvDisplayChannel?.stream_icon ? (
+                {tvPreviewUrl ? (
+                  <VideoView
+                    player={tvPreviewPlayer}
+                    style={StyleSheet.absoluteFillObject}
+                    contentFit="cover"
+                    nativeControls={false}
+                    allowsFullscreen={false}
+                    allowsPictureInPicture={false}
+                  />
+                ) : tvDisplayChannel?.stream_icon ? (
                   <Image source={{ uri: tvDisplayChannel.stream_icon }} style={styles.tvLiveLogo} resizeMode="contain" />
                 ) : (
                   <Text style={styles.tvLiveFallback}>TV</Text>
@@ -483,7 +575,6 @@ export default function HomeScreen({ navigation }) {
                   key={`tv-home-${channel.stream_id || channel.name}`}
                   style={styles.tvRailChannel}
                   focusedStyle={styles.tvRailChannelFocused}
-                  onFocus={() => setTvFocusedChannel(channel)}
                   onPress={() => openLiveFromHome(channel)}
                 >
                   {channel.stream_icon ? (
@@ -496,6 +587,7 @@ export default function HomeScreen({ navigation }) {
                   <Text style={styles.tvRailName} numberOfLines={1}>{channel.name}</Text>
                 </FocusableButton>
               ))}
+              <Text style={styles.tvRailArrow}>v</Text>
             </View>
           </View>
         ) : heroItems.length > 0 ? (
@@ -551,7 +643,7 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── RECOMENDACIONES ── */}
-        {recommendedMovies.length > 0 && (
+        {!isTV && recommendedMovies.length > 0 && (
           <ContentRow
             title="⭐ Recomendado para ti"
             subtitle="Basado en lo que ves"
@@ -563,7 +655,7 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── RECIÉN AGREGADOS ── */}
-        {recentlyAddedMovies.length > 0 && (
+        {!isTV && recentlyAddedMovies.length > 0 && (
           <ContentRow
             title="🆕 Recién agregadas"
             subtitle="Lo último subido al servidor"
@@ -578,7 +670,7 @@ export default function HomeScreen({ navigation }) {
           />
         )}
 
-        {recentlyAddedSeries.length > 0 && (
+        {!isTV && recentlyAddedSeries.length > 0 && (
           <ContentRow
             title="🆕 Series recién agregadas"
             subtitle="Nuevas cargas del servidor"
@@ -596,14 +688,14 @@ export default function HomeScreen({ navigation }) {
         {/* ── CONTINUAR VIENDO ── */}
         <ContentRow
           title="▶ Continuar viendo"
-          data={continueWatching}
+          data={!isTV ? continueWatching : []}
           type="movie"
           showProgress
           onSeeAll={() => navigation.navigate('ContinueWatching')}
           onPress={goToLibraryItem}
         />
 
-        {isTV && (
+        {false && (
           <ContentRow
             title="📺 TV en vivo"
             subtitle="Canales destacados"
@@ -618,7 +710,7 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── ESTRENOS PELÍCULAS ── */}
-        {movieEstrenos.length > 0 && (
+        {!isTV && movieEstrenos.length > 0 && (
           <ContentRow
             title={`🎬 Estrenos ${CURRENT_YEAR}`}
             subtitle="Películas de este año"
@@ -634,7 +726,7 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── ESTRENOS SERIES ── */}
-        {seriesEstrenos.length > 0 && (
+        {!isTV && seriesEstrenos.length > 0 && (
           <ContentRow
             title={`📡 Series ${CURRENT_YEAR}`}
             subtitle="Series estrenadas este año"
@@ -650,7 +742,7 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── MEJOR CALIFICADAS ── */}
-        {topRatedMovies.length > 0 && (
+        {!isTV && topRatedMovies.length > 0 && (
           <ContentRow
             title="⭐ Las mejor calificadas"
             subtitle="Top valoradas por audiencia"
@@ -665,7 +757,7 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ── PORQUE VISTE X ── */}
-        {becauseYouWatched.length > 0 && lastWatched && (
+        {!isTV && becauseYouWatched.length > 0 && lastWatched && (
           <ContentRow
             title={`Porque viste ${(lastWatched.raw || lastWatched).name || ''}`}
             subtitle="Contenido similar"
@@ -685,7 +777,7 @@ export default function HomeScreen({ navigation }) {
         {/* ── DESCARGAS OFFLINE ── */}
         <ContentRow
           title="⬇ Descargas offline"
-          data={downloads.slice(0, isTV ? 30 : 20)}
+          data={!isTV ? downloads.slice(0, 20) : []}
           type="movie"
           onSeeAll={() => navigation.navigate('Downloads')}
           onPress={goToLibraryItem}
@@ -694,7 +786,7 @@ export default function HomeScreen({ navigation }) {
         {/* ── FAVORITOS ── */}
         <ContentRow
           title="❤️ Mis favoritos"
-          data={favorites.slice(0, isTV ? 30 : 20)}
+          data={!isTV ? favorites.slice(0, 20) : []}
           type="movie"
           onSeeAll={() => navigation.navigate('Favorites')}
           onPress={goToLibraryItem}
@@ -703,7 +795,7 @@ export default function HomeScreen({ navigation }) {
         {/* ── TODAS LAS PELÍCULAS ── */}
         <ContentRow
           title="🎬 Películas destacadas"
-          data={movies}
+          data={!isTV ? movies : []}
           type="movie"
           showFavoriteButton
           isFavorite={isFavorite}
@@ -715,7 +807,7 @@ export default function HomeScreen({ navigation }) {
         {/* ── TODAS LAS SERIES ── */}
         <ContentRow
           title="📡 Series populares"
-          data={series}
+          data={!isTV ? series : []}
           type="series"
           showFavoriteButton
           isFavorite={isFavorite}
@@ -739,7 +831,7 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
 
-        <FocusableButton style={styles.updateBtn} onPress={() => checkForUpdates(false)}>
+        <FocusableButton style={styles.updateBtn} disabled={isTV} onPress={() => checkForUpdates(false)}>
           <Text style={styles.updateBtnText}>🔄 Buscar actualizaciones</Text>
         </FocusableButton>
 
@@ -756,6 +848,7 @@ export default function HomeScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  tvScrollContent: { flexGrow: 1 },
   loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', gap: 16 },
   loadingText: { color: colors.white, fontSize: isTV ? 24 : 14, fontWeight: 'bold' },
   loadingSubText: { color: colors.textSecondary, fontSize: isTV ? 16 : 12 },
@@ -775,16 +868,43 @@ const styles = StyleSheet.create({
 
   tvDashboard: {
     flexDirection: 'row',
-    paddingHorizontal: isTV ? 58 : layout.horizontalPadding,
-    paddingTop: isTV ? 24 : 18,
-    paddingBottom: isTV ? 18 : 8,
-    gap: isTV ? 22 : 16,
+    position: 'relative',
+    flex: 1,
+    paddingHorizontal: isTV ? 38 : layout.horizontalPadding,
+    paddingTop: isTV ? 92 : 18,
+    paddingBottom: isTV ? 22 : 8,
+    gap: isTV ? 14 : 16,
     backgroundColor: '#020202',
-    minHeight: isTV ? 520 : undefined,
+    minHeight: isTV ? 690 : undefined,
     alignItems: 'center',
   },
+  tvStatusBar: {
+    position: 'absolute',
+    top: 24,
+    right: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    zIndex: 20,
+  },
+  tvStatusAction: {
+    minHeight: 32,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    justifyContent: 'center',
+  },
+  tvStatusActionFocused: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(31,125,255,0.18)',
+  },
+  tvStatusText: { color: 'rgba(255,255,255,0.82)', fontSize: 14, fontWeight: '800' },
+  tvStatusIcon: { color: 'rgba(255,255,255,0.72)', fontSize: 14, fontWeight: '800' },
+  tvStatusDivider: { color: 'rgba(255,255,255,0.64)', fontSize: 18, fontWeight: '300' },
+  tvClockText: { color: colors.white, fontSize: 18, fontWeight: '800' },
   tvMenuBand: {
-    width: 150,
+    width: 210,
     flexShrink: 0,
     alignSelf: 'stretch',
     paddingTop: 6,
@@ -808,9 +928,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   tvMenuButton: {
-    minHeight: 38,
-    paddingHorizontal: 4,
-    borderRadius: 4,
+    minHeight: 54,
+    paddingHorizontal: 16,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: 'transparent',
     backgroundColor: 'transparent',
@@ -822,6 +942,8 @@ const styles = StyleSheet.create({
   },
   tvMenuButtonActive: {
     opacity: 1,
+    backgroundColor: colors.primary,
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   tvMenuButtonMuted: {
     opacity: 0.42,
@@ -838,7 +960,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tvMenuButtonIconActive: {
-    color: colors.primary,
+    color: colors.white,
   },
   tvMenuButtonText: {
     flex: 1,
@@ -862,7 +984,7 @@ const styles = StyleSheet.create({
   },
   tvLivePreviewImage: {
     flex: 1,
-    minHeight: 430,
+    minHeight: 500,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -887,10 +1009,10 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   tvChannelRail: {
-    width: 260,
+    width: 284,
     alignSelf: 'stretch',
-    paddingTop: 42,
-    gap: 12,
+    paddingTop: 0,
+    gap: 10,
   },
   tvRailArrow: {
     color: 'rgba(255,255,255,0.72)',
@@ -899,7 +1021,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   tvRailChannel: {
-    minHeight: 70,
+    minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
@@ -913,14 +1035,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(31,125,255,0.18)',
   },
   tvRailLogo: {
-    width: 68,
-    height: 58,
+    width: 72,
+    height: 62,
     borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   tvRailLogoFallback: {
-    width: 68,
-    height: 58,
+    width: 72,
+    height: 62,
     borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center',
