@@ -29,7 +29,7 @@ export default function LoginScreen() {
     setLoading(false);
     if (!result.success) {
       Alert.alert(
-        'No se pudo conectar',
+        'No se pudo ingresar',
         result.error || 'Verifica tu usuario y contraseña e intenta de nuevo.'
       );
     }

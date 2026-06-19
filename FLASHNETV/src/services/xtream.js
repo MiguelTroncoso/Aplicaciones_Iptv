@@ -29,6 +29,24 @@ const sp = (val = '') =>
 const base = (server) => server.endsWith('/') ? server : `${server}/`;
 const creds = (u, p) => `username=${sp(u)}&password=${sp(p)}`;
 
+const getAccountStatusError = (userInfo = {}) => {
+  if (!userInfo || userInfo.auth === 0) return 'Credenciales invalidas';
+
+  const status = String(userInfo.status || '').toLowerCase();
+  if (['expired', 'disabled', 'banned'].includes(status)) {
+    if (status === 'expired') return 'Cuenta vencida';
+    if (status === 'disabled') return 'Cuenta desactivada';
+    return 'Cuenta bloqueada';
+  }
+
+  const exp = userInfo.exp_date;
+  if (exp && Number(exp) > 0 && Number(exp) < Date.now() / 1000) {
+    return 'Cuenta vencida';
+  }
+
+  return null;
+};
+
 export const login = async (server, username, password) => {
   try {
     const url = `${base(server)}player_api.php?${creds(username, password)}`;
@@ -37,6 +55,8 @@ export const login = async (server, username, password) => {
     const data = await res.json();
     if (!data?.user_info || data?.user_info?.auth === 0)
       throw new Error('Credenciales inválidas');
+    const statusError = getAccountStatusError(data.user_info);
+    if (statusError) throw new Error(statusError);
     return {
       success:    true,
       userInfo:   data.user_info,
@@ -162,6 +182,8 @@ export const checkSessionValid = async (server, username, password) => {
     const exp = data.user_info.exp_date;
     if (exp && Number(exp) > 0 && Number(exp) < Date.now() / 1000)
       return { valid: false, expired: true, expiredAt: new Date(Number(exp) * 1000) };
+    const statusError = getAccountStatusError(data.user_info);
+    if (statusError) return { valid: false, expired: true };
     return { valid: true, userInfo: data.user_info };
   } catch (_) { return { valid: true }; } // red caída ≠ sesión expirada
 };

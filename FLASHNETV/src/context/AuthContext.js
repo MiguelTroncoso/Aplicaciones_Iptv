@@ -12,6 +12,12 @@ const SESSION_KEY  = 'flashnetv_session_v1';
 const CREDS_KEY    = 'flashnetv_credentials';
 const CREDS_BACKUP = 'flashnetv_creds_backup'; // fallback si SecureStore falla
 
+const clearStoredAuth = async () => {
+  await AsyncStorage.removeItem(SESSION_KEY);
+  await AsyncStorage.removeItem(CREDS_BACKUP);
+  try { await SecureStore.deleteItemAsync(CREDS_KEY); } catch (_) {}
+};
+
 const utf8ToBase64 = (value = '') => {
   const utf8 = encodeURIComponent(String(value || '')).replace(/%([0-9A-F]{2})/g, (_, hex) =>
     String.fromCharCode(parseInt(hex, 16))
@@ -67,8 +73,26 @@ export const AuthProvider = ({ children }) => {
           } catch (_) {}
         }
 
-        setUser({ ...session.user, password });
-        setServer({ ...(session.server || {}), url: BASE_SERVER_URL });
+        if (!session?.user?.username || !password) {
+          await clearStoredAuth();
+          setUser(null);
+          setServer(null);
+          return;
+        }
+
+        const storedServer = { ...(session.server || {}), url: BASE_SERVER_URL };
+        const validation = await checkSessionValid(storedServer.url, session.user.username, password);
+
+        if (validation?.expired || validation?.valid === false) {
+          await clearStoredAuth();
+          setUser(null);
+          setServer(null);
+          return;
+        }
+
+        const freshUserInfo = validation?.userInfo || {};
+        setUser({ ...session.user, ...freshUserInfo, username: session.user.username, password });
+        setServer(storedServer);
         return;
       }
 
@@ -139,9 +163,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
-    await AsyncStorage.removeItem(SESSION_KEY);
-    await AsyncStorage.removeItem(CREDS_BACKUP);       // limpia backup de password
-    try { await SecureStore.deleteItemAsync(CREDS_KEY); } catch (_) {}
+    await clearStoredAuth();
     setUser(null);
     setServer(null);
   };
