@@ -95,10 +95,11 @@ export default function HomeScreen({ navigation }) {
   const [movies, setMovies]         = useState([]);
   const [series, setSeries]         = useState([]);
   const [tvFocusedSection, setTvFocusedSection] = useState('TV');
+  const [tvFocusedChannel, setTvFocusedChannel] = useState(null);
   const [clockText, setClockText] = useState(formatClockTime());
   const tvPreviewPlayer = useVideoPlayer(null, (player) => {
-    player.muted = true;
-    player.volume = 0;
+    player.muted = false;
+    player.volume = 1;
   });
 
   useEffect(() => {
@@ -395,7 +396,7 @@ export default function HomeScreen({ navigation }) {
     () => mergeLastLiveChannel(lastLiveChannel, tvSortedChannels),
     [lastLiveChannel, tvSortedChannels]
   );
-  const tvDisplayChannel = tvPreviewChannel;
+  const tvDisplayChannel = tvFocusedChannel || tvPreviewChannel;
 
   const tvPreviewUrl = useMemo(() => {
     const streamId = tvDisplayChannel?.stream_id || tvDisplayChannel?.id;
@@ -413,8 +414,8 @@ export default function HomeScreen({ navigation }) {
 
     const source = { uri: tvPreviewUrl, contentType: getPreviewContentType(tvPreviewUrl) };
     try {
-      tvPreviewPlayer.muted = true;
-      tvPreviewPlayer.volume = 0;
+      tvPreviewPlayer.muted = false;
+      tvPreviewPlayer.volume = 1;
       if (typeof tvPreviewPlayer.replaceAsync === 'function') {
         tvPreviewPlayer.replaceAsync(source).then(() => tvPreviewPlayer.play()).catch(() => {});
       } else {
@@ -457,7 +458,10 @@ export default function HomeScreen({ navigation }) {
                 key={`${item.screen}-${item.label}`}
                 style={[styles.tvMenuButton, active && styles.tvMenuButtonActive, !active && index > 1 && styles.tvMenuButtonMuted]}
                 focusedStyle={styles.tvMenuButtonFocused}
-                onFocus={() => setTvFocusedSection(item.label)}
+                onFocus={() => {
+                  setTvFocusedSection(item.label);
+                  if (item.screen === 'LiveTV') setTvFocusedChannel(tvPreviewChannel);
+                }}
                 onPress={() => {
                   if (item.screen === 'LiveTV') openLiveFromHome();
                   else navigation.navigate(item.screen);
@@ -523,20 +527,20 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.tvDashboard}>
             <View style={styles.tvStatusBar}>
               <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => navigation.navigate('Search')}>
-                <Text style={styles.tvStatusText}>Buscar</Text>
+                <Text style={styles.tvStatusText}>⌕</Text>
               </FocusableButton>
               <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => navigation.navigate('LiveTV')}>
-                <Text style={styles.tvStatusText}>Filtro</Text>
+                <Text style={styles.tvStatusText}>▾</Text>
               </FocusableButton>
               <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => openLiveFromHome()}>
-                <Text style={styles.tvStatusText}>Ultimo</Text>
+                <Text style={styles.tvStatusText}>◷</Text>
               </FocusableButton>
               <FocusableButton style={styles.tvStatusAction} focusedStyle={styles.tvStatusActionFocused} onPress={() => navigation.navigate('Account')}>
-                <Text style={styles.tvStatusText}>Cuenta</Text>
+                <Text style={styles.tvStatusText}>●</Text>
               </FocusableButton>
-              <Text style={styles.tvStatusIcon}>Aviso</Text>
+              <Text style={styles.tvStatusIcon}>●</Text>
               <Text style={styles.tvStatusDivider}>|</Text>
-              <Text style={styles.tvStatusIcon}>Wi-Fi</Text>
+              <Text style={styles.tvStatusIcon}>≋</Text>
               <Text style={styles.tvClockText}>{clockText}</Text>
             </View>
             {renderTVHomeMenu()}
@@ -570,13 +574,15 @@ export default function HomeScreen({ navigation }) {
 
             <View style={styles.tvChannelRail}>
               <Text style={styles.tvRailArrow}>⌃</Text>
-              {tvSortedChannels.slice(0, 6).map((channel) => (
+              {tvSortedChannels.slice(0, 6).map((channel, index) => (
                 <FocusableButton
                   key={`tv-home-${channel.stream_id || channel.name}`}
                   style={styles.tvRailChannel}
                   focusedStyle={styles.tvRailChannelFocused}
+                  onFocus={() => setTvFocusedChannel(channel)}
                   onPress={() => openLiveFromHome(channel)}
                 >
+                  <Text style={styles.tvRailNumber}>{index + 1}</Text>
                   {channel.stream_icon ? (
                     <Image source={{ uri: channel.stream_icon }} style={styles.tvRailLogo} resizeMode="contain" />
                   ) : (
@@ -870,10 +876,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     position: 'relative',
     flex: 1,
-    paddingHorizontal: isTV ? 38 : layout.horizontalPadding,
+    paddingHorizontal: isTV ? 42 : layout.horizontalPadding,
     paddingTop: isTV ? 92 : 18,
     paddingBottom: isTV ? 22 : 8,
-    gap: isTV ? 14 : 16,
+    gap: isTV ? 10 : 16,
     backgroundColor: '#020202',
     minHeight: isTV ? 690 : undefined,
     alignItems: 'center',
@@ -888,29 +894,30 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   tvStatusAction: {
-    minHeight: 32,
-    paddingHorizontal: 8,
-    borderRadius: 6,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 1,
     borderColor: 'transparent',
+    alignItems: 'center',
     justifyContent: 'center',
   },
   tvStatusActionFocused: {
     borderColor: colors.primary,
     backgroundColor: 'rgba(31,125,255,0.18)',
   },
-  tvStatusText: { color: 'rgba(255,255,255,0.82)', fontSize: 14, fontWeight: '800' },
-  tvStatusIcon: { color: 'rgba(255,255,255,0.72)', fontSize: 14, fontWeight: '800' },
+  tvStatusText: { color: 'rgba(255,255,255,0.82)', fontSize: 30, fontWeight: '900', lineHeight: 34 },
+  tvStatusIcon: { color: 'rgba(255,255,255,0.72)', fontSize: 24, fontWeight: '900' },
   tvStatusDivider: { color: 'rgba(255,255,255,0.64)', fontSize: 18, fontWeight: '300' },
   tvClockText: { color: colors.white, fontSize: 18, fontWeight: '800' },
   tvMenuBand: {
-    width: 210,
+    width: 168,
     flexShrink: 0,
     alignSelf: 'stretch',
     paddingTop: 6,
     paddingBottom: 8,
     paddingHorizontal: 0,
-    backgroundColor: 'rgba(0,0,0,0.30)',
+    backgroundColor: 'transparent',
     gap: 34,
   },
   tvMenuHeader: {
@@ -929,7 +936,7 @@ const styles = StyleSheet.create({
   },
   tvMenuButton: {
     minHeight: 54,
-    paddingHorizontal: 16,
+    paddingHorizontal: 6,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'transparent',
@@ -942,15 +949,15 @@ const styles = StyleSheet.create({
   },
   tvMenuButtonActive: {
     opacity: 1,
-    backgroundColor: colors.primary,
-    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
   },
   tvMenuButtonMuted: {
     opacity: 0.42,
   },
   tvMenuButtonFocused: {
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(31,125,255,0.20)',
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(31,125,255,0.12)',
   },
   tvMenuButtonIcon: {
     width: 22,
@@ -960,7 +967,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tvMenuButtonIconActive: {
-    color: colors.white,
+    color: colors.primary,
   },
   tvMenuButtonText: {
     flex: 1,
@@ -1009,7 +1016,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   tvChannelRail: {
-    width: 284,
+    width: 300,
     alignSelf: 'stretch',
     paddingTop: 0,
     gap: 10,
@@ -1024,7 +1031,7 @@ const styles = StyleSheet.create({
     minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'transparent',
@@ -1049,6 +1056,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tvRailLogoText: { color: colors.white, fontSize: 24, fontWeight: '900' },
+  tvRailNumber: {
+    width: 28,
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
   tvRailName: {
     flex: 1,
     color: colors.white,

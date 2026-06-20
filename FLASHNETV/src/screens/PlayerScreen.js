@@ -92,6 +92,12 @@ const LIVE_STALL_SECONDS = 12;
 const VOD_STALL_SECONDS = 18;
 const STALL_TICK_MS = 4000;
 
+const getDigitFromTVEvent = (event = {}) => {
+  const raw = String(event.eventType || event.eventKeyAction || event.key || '');
+  const match = raw.match(/(?:digit|number|num)?([0-9])$/i);
+  return match ? match[1] : null;
+};
+
 const shouldOfferNextEpisode = ({ hasNextEp, playbackStarted, currentTime, duration, playerStatus }) => {
   const ct = Number(currentTime || 0);
   const d = Number(duration || 0);
@@ -215,6 +221,8 @@ export default function PlayerScreen({ route, navigation }) {
   const [liveGuideCategories, setLiveGuideCategories] = useState([]);
   const [liveGuideChannels, setLiveGuideChannels] = useState([]);
   const [liveGuideCategoryId, setLiveGuideCategoryId] = useState(stream?.category_id ?? null);
+  const [showLiveGuideCategories, setShowLiveGuideCategories] = useState(false);
+  const [channelNumberInput, setChannelNumberInput] = useState('');
   const liveGuidePrefetchedRef = useRef(false);
 
   const viewRef          = useRef(null);
@@ -222,6 +230,7 @@ export default function PlayerScreen({ route, navigation }) {
   const appStateRef      = useRef(AppState.currentState);
   const nextEpCountRef   = useRef(null);
   const controlsTimerRef = useRef(null);
+  const channelNumberTimerRef = useRef(null);
   const lockMessageTimerRef = useRef(null);
   const allowNavigationAwayRef = useRef(false);
   const isNavigatingBackRef = useRef(false);
@@ -381,6 +390,7 @@ export default function PlayerScreen({ route, navigation }) {
     if (type !== 'live') return;
     clearControlsTimer();
     setShowControls(false);
+    setShowLiveGuideCategories(false);
     setShowLiveGuide(true);
     if (!liveGuideChannels.length) loadLiveGuide();
   }, [clearControlsTimer, liveGuideChannels.length, loadLiveGuide, type]);
@@ -406,20 +416,76 @@ export default function PlayerScreen({ route, navigation }) {
     return liveGuideChannels.filter(channel => String(channel.category_id) === String(liveGuideCategoryId));
   }, [liveGuideCategoryId, liveGuideChannels]);
 
+  const currentLiveIndex = useMemo(() => {
+    if (type !== 'live') return -1;
+    return liveGuideChannels.findIndex(channel =>
+      String(channel.stream_id || channel.name) === String(stream?.stream_id || stream?.name)
+    );
+  }, [liveGuideChannels, stream?.name, stream?.stream_id, type]);
+
+  const currentLiveNumber = currentLiveIndex >= 0 ? currentLiveIndex + 1 : null;
+
+  const playAdjacentLiveChannel = useCallback((direction) => {
+    if (type !== 'live') return;
+    if (!liveGuideChannels.length) {
+      loadLiveGuide();
+      return;
+    }
+    const baseIndex = currentLiveIndex >= 0 ? currentLiveIndex : 0;
+    const nextIndex = (baseIndex + direction + liveGuideChannels.length) % liveGuideChannels.length;
+    playLiveGuideChannel(liveGuideChannels[nextIndex]);
+  }, [currentLiveIndex, liveGuideChannels, loadLiveGuide, playLiveGuideChannel, type]);
+
+  const handleChannelNumberDigit = useCallback((digit) => {
+    if (type !== 'live' || digit === null || digit === undefined) return false;
+    const nextInput = `${channelNumberInput}${digit}`.slice(0, 4);
+    const list = showLiveGuide ? liveGuideFilteredChannels : liveGuideChannels;
+    if (!list.length) loadLiveGuide();
+    setChannelNumberInput(nextInput);
+    if (channelNumberTimerRef.current) clearTimeout(channelNumberTimerRef.current);
+    channelNumberTimerRef.current = setTimeout(() => {
+      const numeric = Number(nextInput);
+      setChannelNumberInput('');
+      if (!Number.isFinite(numeric) || numeric <= 0) return;
+      const target = list[numeric - 1];
+      if (target) playLiveGuideChannel(target);
+    }, 850);
+    return true;
+  }, [channelNumberInput, liveGuideChannels, liveGuideFilteredChannels, loadLiveGuide, playLiveGuideChannel, showLiveGuide, type]);
+
   useEffect(() => {
     if (!isTV || !TVEventHandler?.addListener) return undefined;
 
     const sub = TVEventHandler.addListener((event) => {
       const eventType = event?.eventType;
+      const digit = getDigitFromTVEvent(event);
+      if (digit !== null && handleChannelNumberDigit(digit)) return;
+
+      if (showLiveGuide) {
+        if (eventType === 'left') setShowLiveGuideCategories(true);
+        if (eventType === 'right') setShowLiveGuideCategories(false);
+        if (eventType === 'menu') closeLiveGuide();
+        return;
+      }
+
       if (
         pipActive ||
         showTrackModal ||
-        showLiveGuide ||
         showNextEpPrompt ||
         playerStatus === 'error' ||
         !canPlay ||
         screenLocked
       ) {
+        return;
+      }
+
+      if (type === 'live' && eventType === 'up') {
+        playAdjacentLiveChannel(-1);
+        return;
+      }
+
+      if (type === 'live' && eventType === 'down') {
+        playAdjacentLiveChannel(1);
         return;
       }
 
@@ -436,7 +502,7 @@ export default function PlayerScreen({ route, navigation }) {
     return () => {
       try { sub?.remove?.(); } catch (_) {}
     };
-  }, [canPlay, openLiveGuide, pipActive, playerStatus, screenLocked, showControlsTemporarily, showLiveGuide, showNextEpPrompt, showTrackModal, type]);
+  }, [canPlay, closeLiveGuide, handleChannelNumberDigit, openLiveGuide, pipActive, playAdjacentLiveChannel, playerStatus, screenLocked, showControlsTemporarily, showLiveGuide, showNextEpPrompt, showTrackModal, type]);
 
   useEffect(() => {
     if (playbackStarted && canAutoHideControls()) {
@@ -449,6 +515,10 @@ export default function PlayerScreen({ route, navigation }) {
     setShowControls(true);
     return clearControlsTimer;
   }, [playbackStarted, canAutoHideControls, startControlsTimer, clearControlsTimer]);
+
+  useEffect(() => () => {
+    if (channelNumberTimerRef.current) clearTimeout(channelNumberTimerRef.current);
+  }, []);
 
   // ─── URL del stream ───────────────────────────────────────────────────────
   const playbackExtension = getPlaybackExtension(stream, type);
@@ -1434,7 +1504,7 @@ export default function PlayerScreen({ route, navigation }) {
       )}
 
       {/* ── LOADING ── */}
-      {playerStatus === 'loading' && !playbackStarted && (
+      {playerStatus === 'loading' && !playbackStarted && type !== 'live' && (
         <View style={styles.overlay}>
           <ActivityIndicator color={colors.accent} size="large" />
           <Text style={styles.loadingText}>
@@ -1469,6 +1539,12 @@ export default function PlayerScreen({ route, navigation }) {
       )}
 
       {/* ── CONTROLES OVERLAY tipo Netflix: se ocultan solos al reproducir ── */}
+      {!!channelNumberInput && (
+        <View style={styles.channelNumberOverlay} pointerEvents="none">
+          <Text style={styles.channelNumberText}>{channelNumberInput}</Text>
+        </View>
+      )}
+
       {!pipActive && showControls && playerStatus !== 'error' && (
         <View
           pointerEvents="box-none"
@@ -1533,6 +1609,7 @@ export default function PlayerScreen({ route, navigation }) {
           </View>
 
           {/* Controles centrales: pausar, retroceder, adelantar */}
+          {type !== 'live' && (
           <View style={styles.centerControls} pointerEvents="box-none">
             {type !== 'live' && (
               <FocusableButton style={styles.seekBtn} onFocus={showControlsTemporarily} onPress={() => seekBy(-10)}>
@@ -1555,6 +1632,7 @@ export default function PlayerScreen({ route, navigation }) {
               </FocusableButton>
             )}
           </View>
+          )}
 
           {type !== 'live' && duration > 0 && (
             <View style={styles.progressWrap}>
@@ -1613,11 +1691,23 @@ export default function PlayerScreen({ route, navigation }) {
           )}
 
           {/* Barra info */}
-          <View style={styles.infoBar}>
+          <View style={[styles.infoBar, type === 'live' && styles.infoBarLive]}>
+            {type === 'live' && (
+              <View style={styles.liveInfoLogoWrap}>
+                {stream.stream_icon ? (
+                  <Image source={{ uri: stream.stream_icon }} style={styles.liveInfoLogo} resizeMode="contain" />
+                ) : (
+                  <Text style={styles.liveInfoLogoText}>{String(stream.name || '?').charAt(0)}</Text>
+                )}
+              </View>
+            )}
             <View style={styles.infoTextWrap}>
               <Text style={styles.channelName} numberOfLines={2}>
-                {cleanName(stream.name || stream.title || '')}
+                {type === 'live' && currentLiveNumber ? `${currentLiveNumber}  ` : ''}{cleanName(stream.name || stream.title || '')}
               </Text>
+              {type === 'live' && (
+                <Text style={styles.liveProgramText}>Actualizar:                              Proximo:</Text>
+              )}
               {offlineMode && <Text style={styles.offlineText}>🔒 Sin conexión</Text>}
               {duration > 0 && currentTime > 0 && (
                 <Text style={styles.offlineText}>{formatTime(duration - currentTime)}</Text>
@@ -1627,7 +1717,9 @@ export default function PlayerScreen({ route, navigation }) {
               )}
             </View>
             {type === 'live' && (
-              <View style={styles.liveDot}>
+              <View style={styles.liveInfoRight}>
+                <Text style={styles.liveInfoDate}>{new Date().toISOString().slice(0, 10)}</Text>
+                <Text style={styles.liveInfoTime}>00:00-23:59</Text>
                 <Text style={styles.liveText}>● EN VIVO</Text>
               </View>
             )}
@@ -1748,6 +1840,7 @@ export default function PlayerScreen({ route, navigation }) {
                 </FocusableButton>
               </View>
 
+              {showLiveGuideCategories && (
               <View style={guideStyles.categoryPanel}>
                 <Text style={guideStyles.panelTitle}>Categorias</Text>
                 {liveGuideLoading && !liveGuideCategories.length ? (
@@ -1779,6 +1872,7 @@ export default function PlayerScreen({ route, navigation }) {
                   />
                 )}
               </View>
+              )}
 
               <View style={guideStyles.channelPanel}>
                 <View style={guideStyles.channelHeader}>
@@ -1798,14 +1892,16 @@ export default function PlayerScreen({ route, navigation }) {
                       <Text style={guideStyles.emptyText}>Sin canales en esta categoria</Text>
                     </View>
                   }
-                  renderItem={({ item }) => {
+                  renderItem={({ item, index }) => {
                     const active = String(item.stream_id || item.name) === String(stream?.stream_id || stream?.name);
                     return (
                       <FocusableButton
                         style={[guideStyles.channelRow, active && guideStyles.channelRowActive]}
                         focusedStyle={guideStyles.focused}
+                        hasTVPreferredFocus={isTV && active}
                         onPress={() => playLiveGuideChannel(item)}
                       >
+                        <Text style={guideStyles.channelNumber}>{index + 1}</Text>
                         {item.stream_icon ? (
                           <Image source={{ uri: item.stream_icon }} style={guideStyles.channelLogo} resizeMode="contain" />
                         ) : (
@@ -2100,6 +2196,16 @@ const styles = StyleSheet.create({
     position: 'absolute', bottom: 100, left: 16, right: 16,
     flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
   },
+  infoBarLive: {
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: isTV ? 118 : 86,
+    paddingHorizontal: isTV ? 42 : 18,
+    paddingVertical: isTV ? 18 : 12,
+    backgroundColor: 'rgba(8,12,24,0.78)',
+    alignItems: 'center',
+  },
   infoTextWrap: { flex: 1, paddingRight: 12 },
   channelName: {
     color: colors.white, fontSize: 16, fontWeight: 'bold',
@@ -2112,6 +2218,19 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#ff3b3b55',
   },
   liveText: { color: '#ff5555', fontSize: 11, fontWeight: 'bold' },
+  liveInfoLogoWrap: {
+    width: isTV ? 96 : 58,
+    height: isTV ? 76 : 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: isTV ? 22 : 12,
+  },
+  liveInfoLogo: { width: '100%', height: '100%' },
+  liveInfoLogoText: { color: colors.white, fontSize: isTV ? 36 : 24, fontWeight: '900' },
+  liveProgramText: { color: colors.accent, fontSize: isTV ? 16 : 11, marginTop: 4, fontWeight: '700' },
+  liveInfoRight: { alignItems: 'flex-end', gap: 3, minWidth: isTV ? 180 : 110 },
+  liveInfoDate: { color: colors.white, fontSize: isTV ? 18 : 12, fontWeight: '800' },
+  liveInfoTime: { color: colors.white, fontSize: isTV ? 16 : 11, fontWeight: '700' },
   trackQuickActions: {
     position: 'absolute', left: 32, bottom: 86,
     flexDirection: 'row', gap: 10, zIndex: 7,
@@ -2160,6 +2279,23 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.18)',
   },
   stallRecoveryText: { color: colors.white, fontSize: 14, fontWeight: '800' },
+  channelNumberOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  channelNumberText: {
+    color: colors.white,
+    fontSize: isTV ? 112 : 72,
+    fontWeight: '900',
+    textShadowColor: '#000',
+    textShadowRadius: 12,
+  },
 
   // ── Next Episode ────────────────────────────────────────────────────────────
   nextEpPrompt: {
@@ -2216,7 +2352,7 @@ const styles = StyleSheet.create({
 const guideStyles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.26)',
+    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'flex-start',
     paddingVertical: isTV ? 30 : 18,
@@ -2225,18 +2361,18 @@ const guideStyles = StyleSheet.create({
   },
   focusGuide: { width: '100%' },
   shell: {
-    width: isTV ? '64%' : '100%',
-    minWidth: isTV ? 690 : 0,
+    width: isTV ? '58%' : '100%',
+    minWidth: isTV ? 610 : 0,
     maxWidth: isTV ? 780 : 620,
     height: isTV ? '88%' : '82%',
     flexDirection: 'row',
-    backgroundColor: 'rgba(11,16,28,0.88)',
+    backgroundColor: 'rgba(10,14,25,0.74)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.16)',
   },
   sideRail: {
-    width: isTV ? 150 : 84,
-    backgroundColor: 'rgba(5,7,11,0.62)',
+    width: isTV ? 118 : 84,
+    backgroundColor: 'rgba(5,7,11,0.42)',
     borderRightWidth: 1,
     borderRightColor: 'rgba(255,255,255,0.12)',
     padding: isTV ? 14 : 10,
@@ -2254,8 +2390,8 @@ const guideStyles = StyleSheet.create({
   },
   railActionText: { color: colors.white, fontSize: isTV ? 13 : 11, fontWeight: '800' },
   categoryPanel: {
-    width: isTV ? 220 : 150,
-    backgroundColor: 'rgba(17,25,42,0.78)',
+    width: isTV ? 210 : 150,
+    backgroundColor: 'rgba(17,25,42,0.58)',
     borderRightWidth: 1,
     borderRightColor: 'rgba(255,255,255,0.12)',
     padding: isTV ? 12 : 8,
@@ -2300,6 +2436,13 @@ const guideStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'transparent',
     backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  channelNumber: {
+    width: isTV ? 36 : 26,
+    color: colors.white,
+    fontSize: isTV ? 18 : 13,
+    fontWeight: '900',
+    textAlign: 'right',
   },
   channelRowActive: { backgroundColor: 'rgba(31,125,255,0.20)' },
   channelLogo: { width: isTV ? 44 : 34, height: isTV ? 34 : 28, backgroundColor: 'rgba(0,0,0,0.28)' },
