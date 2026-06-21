@@ -223,6 +223,7 @@ export default function PlayerScreen({ route, navigation }) {
   const [liveGuideCategoryId, setLiveGuideCategoryId] = useState(stream?.category_id ?? null);
   const [showLiveGuideCategories, setShowLiveGuideCategories] = useState(false);
   const [channelNumberInput, setChannelNumberInput] = useState('');
+  const [showLiveInfo, setShowLiveInfo] = useState(true);
   const liveGuidePrefetchedRef = useRef(false);
 
   const viewRef          = useRef(null);
@@ -231,6 +232,7 @@ export default function PlayerScreen({ route, navigation }) {
   const nextEpCountRef   = useRef(null);
   const controlsTimerRef = useRef(null);
   const channelNumberTimerRef = useRef(null);
+  const liveInfoTimerRef = useRef(null);
   const lockMessageTimerRef = useRef(null);
   const allowNavigationAwayRef = useRef(false);
   const isNavigatingBackRef = useRef(false);
@@ -335,6 +337,15 @@ export default function PlayerScreen({ route, navigation }) {
     startControlsTimer();
   }, [pipActive, startControlsTimer]);
 
+  const showLiveInfoTemporarily = useCallback(() => {
+    if (type !== 'live') return;
+    setShowLiveInfo(true);
+    if (liveInfoTimerRef.current) clearTimeout(liveInfoTimerRef.current);
+    liveInfoTimerRef.current = setTimeout(() => {
+      setShowLiveInfo(false);
+    }, 5000);
+  }, [type]);
+
   const decorateLiveChannels = useCallback((items = [], categories = []) => {
     const categoryMap = {};
     categories.forEach(cat => {
@@ -366,6 +377,7 @@ export default function PlayerScreen({ route, navigation }) {
       setLiveGuideCategories(categoriesWithChannels);
       setLiveGuideChannels(channels);
       setLiveGuideCategoryId(prev => {
+        if (prev === null) return null;
         if (prev && categoriesWithChannels.some(cat => String(cat.category_id) === String(prev))) return prev;
         if (stream?.category_id && categoriesWithChannels.some(cat => String(cat.category_id) === String(stream.category_id))) return stream.category_id;
         return categoriesWithChannels[0]?.category_id ?? null;
@@ -390,6 +402,7 @@ export default function PlayerScreen({ route, navigation }) {
     if (type !== 'live') return;
     clearControlsTimer();
     setShowControls(false);
+    setLiveGuideCategoryId(null);
     setShowLiveGuideCategories(false);
     setShowLiveGuide(true);
     if (!liveGuideChannels.length) loadLiveGuide();
@@ -480,11 +493,13 @@ export default function PlayerScreen({ route, navigation }) {
       }
 
       if (type === 'live' && eventType === 'up') {
+        showLiveInfoTemporarily();
         playAdjacentLiveChannel(-1);
         return;
       }
 
       if (type === 'live' && eventType === 'down') {
+        showLiveInfoTemporarily();
         playAdjacentLiveChannel(1);
         return;
       }
@@ -496,13 +511,20 @@ export default function PlayerScreen({ route, navigation }) {
 
       if (['up', 'down', 'left', 'right', 'select', 'playPause', 'play', 'pause', 'rewind', 'fastForward', 'menu'].includes(eventType)) {
         showControlsTemporarily();
+        showLiveInfoTemporarily();
       }
     });
 
     return () => {
       try { sub?.remove?.(); } catch (_) {}
     };
-  }, [canPlay, closeLiveGuide, handleChannelNumberDigit, openLiveGuide, pipActive, playAdjacentLiveChannel, playerStatus, screenLocked, showControlsTemporarily, showLiveGuide, showNextEpPrompt, showTrackModal, type]);
+  }, [canPlay, closeLiveGuide, handleChannelNumberDigit, openLiveGuide, pipActive, playAdjacentLiveChannel, playerStatus, screenLocked, showControlsTemporarily, showLiveGuide, showLiveInfoTemporarily, showNextEpPrompt, showTrackModal, type]);
+
+  useEffect(() => {
+    if (type !== 'live') return undefined;
+    showLiveInfoTemporarily();
+    return undefined;
+  }, [showLiveInfoTemporarily, stream?.stream_id, stream?.name, type]);
 
   useEffect(() => {
     if (playbackStarted && canAutoHideControls()) {
@@ -518,6 +540,7 @@ export default function PlayerScreen({ route, navigation }) {
 
   useEffect(() => () => {
     if (channelNumberTimerRef.current) clearTimeout(channelNumberTimerRef.current);
+    if (liveInfoTimerRef.current) clearTimeout(liveInfoTimerRef.current);
   }, []);
 
   // ─── URL del stream ───────────────────────────────────────────────────────
@@ -1691,6 +1714,7 @@ export default function PlayerScreen({ route, navigation }) {
           )}
 
           {/* Barra info */}
+          {(type !== 'live' || showLiveInfo) && (
           <View style={[styles.infoBar, type === 'live' && styles.infoBarLive]}>
             {type === 'live' && (
               <View style={styles.liveInfoLogoWrap}>
@@ -1724,6 +1748,7 @@ export default function PlayerScreen({ route, navigation }) {
               </View>
             )}
           </View>
+          )}
 
           {/* Accesos rápidos inferiores: como en versiones anteriores */}
           {type !== 'live' && (
@@ -1853,6 +1878,19 @@ export default function PlayerScreen({ route, navigation }) {
                     data={liveGuideCategories}
                     keyExtractor={(item, index) => `guide-cat-${item.category_id || index}`}
                     showsVerticalScrollIndicator={false}
+                    ListHeaderComponent={(
+                      <FocusableButton
+                        style={[guideStyles.categoryBtn, !liveGuideCategoryId && guideStyles.categoryBtnActive]}
+                        focusedStyle={guideStyles.focused}
+                        hasTVPreferredFocus={isTV && !liveGuideCategoryId}
+                        onFocus={() => setLiveGuideCategoryId(null)}
+                        onPress={() => setLiveGuideCategoryId(null)}
+                      >
+                        <Text style={[guideStyles.categoryText, !liveGuideCategoryId && guideStyles.activeText]} numberOfLines={1}>
+                          Todos los canales
+                        </Text>
+                      </FocusableButton>
+                    )}
                     renderItem={({ item, index }) => {
                       const active = String(item.category_id) === String(liveGuideCategoryId);
                       return (
@@ -1883,10 +1921,10 @@ export default function PlayerScreen({ route, navigation }) {
                   data={liveGuideFilteredChannels}
                   keyExtractor={(item, index) => `guide-channel-${item.stream_id || item.name || index}`}
                   showsVerticalScrollIndicator={false}
-                  initialNumToRender={10}
-                  maxToRenderPerBatch={8}
-                  windowSize={5}
-                  removeClippedSubviews
+                  initialNumToRender={18}
+                  maxToRenderPerBatch={18}
+                  windowSize={9}
+                  removeClippedSubviews={false}
                   ListEmptyComponent={
                     <View style={guideStyles.emptyBox}>
                       <Text style={guideStyles.emptyText}>Sin canales en esta categoria</Text>
@@ -1901,7 +1939,6 @@ export default function PlayerScreen({ route, navigation }) {
                         hasTVPreferredFocus={isTV && active}
                         onPress={() => playLiveGuideChannel(item)}
                       >
-                        <Text style={guideStyles.channelNumber}>{index + 1}</Text>
                         {item.stream_icon ? (
                           <Image source={{ uri: item.stream_icon }} style={guideStyles.channelLogo} resizeMode="contain" />
                         ) : (
@@ -1909,6 +1946,7 @@ export default function PlayerScreen({ route, navigation }) {
                             <Text style={guideStyles.channelLogoText}>{String(item.name || '?').charAt(0)}</Text>
                           </View>
                         )}
+                        <Text style={guideStyles.channelNumber}>{index + 1}</Text>
                         <View style={guideStyles.channelInfo}>
                           <Text style={[guideStyles.channelName, active && guideStyles.activeText]} numberOfLines={1}>
                             {active ? '▶ ' : ''}{cleanName(item.name || '')}

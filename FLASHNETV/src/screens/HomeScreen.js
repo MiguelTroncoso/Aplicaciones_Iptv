@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Alert, Text, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, RefreshControl, Image,
+  ScrollView, ActivityIndicator, RefreshControl, Image, FlatList,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -78,6 +78,25 @@ const byRating = (a, b) => {
   return rb - ra;
 };
 
+const getTVContentRaw = (item) => item?.raw || item || {};
+
+const getTVContentTitle = (item) => {
+  const raw = getTVContentRaw(item);
+  return raw.name || raw.title || raw.series_name || 'Contenido';
+};
+
+const getTVContentImage = (item) => {
+  const raw = getTVContentRaw(item);
+  return raw.stream_icon || raw.cover || raw.cover_big || raw.movie_image || raw.poster || raw.image || raw.backdrop_path || null;
+};
+
+const getTVContentType = (item) => {
+  const raw = getTVContentRaw(item);
+  if (item?.type) return item.type;
+  if (raw.series_id && !raw.stream_id) return 'series';
+  return 'movie';
+};
+
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export default function HomeScreen({ navigation }) {
@@ -96,6 +115,7 @@ export default function HomeScreen({ navigation }) {
   const [series, setSeries]         = useState([]);
   const [tvFocusedSection, setTvFocusedSection] = useState('TV');
   const [tvFocusedChannel, setTvFocusedChannel] = useState(null);
+  const [tvFocusedContent, setTvFocusedContent] = useState(null);
   const [clockText, setClockText] = useState(formatClockTime());
   const tvPreviewPlayer = useVideoPlayer(null, (player) => {
     player.muted = false;
@@ -396,13 +416,52 @@ export default function HomeScreen({ navigation }) {
     () => mergeLastLiveChannel(lastLiveChannel, tvSortedChannels),
     [lastLiveChannel, tvSortedChannels]
   );
-  const tvDisplayChannel = tvFocusedChannel || tvPreviewChannel;
+  const tvIsLiveSection = tvFocusedSection === 'TV';
+  const tvSectionItems = useMemo(() => {
+    if (tvFocusedSection === 'TV') return tvSortedChannels;
+    if (tvFocusedSection === 'DESTACADOS') {
+      const highlights = [
+        ...heroItems,
+        ...recentlyAddedMovies,
+        ...recentlyAddedSeries,
+        ...movieEstrenos,
+        ...seriesEstrenos,
+      ];
+      return highlights.length ? highlights : [...movies, ...series];
+    }
+    if (tvFocusedSection === 'PELICULA') return movies;
+    if (tvFocusedSection === 'SERIES') return series;
+    if (tvFocusedSection === 'KIDS') {
+      const kidsItems = [...movies, ...series].filter(item => {
+        const raw = getTVContentRaw(item);
+        const text = `${raw.name || ''} ${raw.title || ''} ${raw.category_name || ''}`.toLowerCase();
+        return text.includes('kids') || text.includes('infantil') || text.includes('niños') || text.includes('ninos');
+      });
+      return kidsItems.length ? kidsItems : [...movies, ...series];
+    }
+    if (tvFocusedSection === 'ANIME') {
+      const animeItems = [...movies, ...series].filter(item => {
+        const raw = getTVContentRaw(item);
+        const text = `${raw.name || ''} ${raw.title || ''} ${raw.category_name || ''}`.toLowerCase();
+        return text.includes('anime');
+      });
+      return animeItems.length ? animeItems : [...movies, ...series];
+    }
+    return [...movies, ...series];
+  }, [heroItems, movieEstrenos, movies, recentlyAddedMovies, recentlyAddedSeries, series, seriesEstrenos, tvFocusedSection, tvSortedChannels]);
+
+  const tvDisplayChannel = tvIsLiveSection ? (tvFocusedChannel || tvPreviewChannel) : null;
+  const tvDisplayContent = tvIsLiveSection ? null : (tvFocusedContent || tvSectionItems[0]);
+  const tvPreviewImage = tvDisplayContent ? getTVContentImage(tvDisplayContent) : null;
+  const tvPreviewTitle = tvIsLiveSection
+    ? tvDisplayChannel?.name || 'TV en vivo'
+    : getTVContentTitle(tvDisplayContent) || tvFocusedSection;
 
   const tvPreviewUrl = useMemo(() => {
     const streamId = tvDisplayChannel?.stream_id || tvDisplayChannel?.id;
-    if (!isTV || !streamId || !server?.url || !user?.username || !user?.password) return null;
+    if (!isTV || !tvIsLiveSection || !streamId || !server?.url || !user?.username || !user?.password) return null;
     return getStreamUrl(server.url, user.username, user.password, streamId, 'live', 'ts');
-  }, [server?.url, tvDisplayChannel, user?.password, user?.username]);
+  }, [server?.url, tvDisplayChannel, tvIsLiveSection, user?.password, user?.username]);
 
   useEffect(() => {
     if (!isTV) return undefined;
@@ -443,6 +502,24 @@ export default function HomeScreen({ navigation }) {
     navigation.navigate('LiveTV');
   }, [navigation, tvDisplayChannel]);
 
+  const openTVSectionItem = useCallback((item) => {
+    if (tvFocusedSection === 'TV') {
+      openLiveFromHome(item);
+      return;
+    }
+    const raw = getTVContentRaw(item || tvDisplayContent);
+    if (!raw?.stream_id && !raw?.series_id) {
+      navigation.navigate(TV_HOME_MENU.find(menu => menu.label === tvFocusedSection)?.screen || 'Search');
+      return;
+    }
+    const type = getTVContentType(item || tvDisplayContent);
+    if (type === 'series') {
+      navigation.navigate('SeriesDetail', { serie: raw });
+      return;
+    }
+    navigation.navigate('MovieDetail', { stream: raw, type: 'movie' });
+  }, [navigation, openLiveFromHome, tvDisplayContent, tvFocusedSection]);
+
   const renderTVHomeMenu = () => {
     if (!isTV) return null;
     return (
@@ -460,10 +537,13 @@ export default function HomeScreen({ navigation }) {
                 focusedStyle={styles.tvMenuButtonFocused}
                 onFocus={() => {
                   setTvFocusedSection(item.label);
+                  setTvFocusedContent(null);
                   if (item.screen === 'LiveTV') setTvFocusedChannel(tvPreviewChannel);
+                  else setTvFocusedChannel(null);
                 }}
                 onPress={() => {
                   if (item.screen === 'LiveTV') openLiveFromHome();
+                  else if (tvSectionItems.length) openTVSectionItem(tvSectionItems[0]);
                   else navigation.navigate(item.screen);
                 }}
               >
@@ -549,7 +629,10 @@ export default function HomeScreen({ navigation }) {
               style={styles.tvLivePreview}
               focusedStyle={styles.tvLivePreviewFocused}
               hasTVPreferredFocus={isTV}
-              onPress={() => openLiveFromHome()}
+              onPress={() => {
+                if (tvIsLiveSection) openLiveFromHome();
+                else openTVSectionItem(tvDisplayContent);
+              }}
             >
               <View style={styles.tvLivePreviewImage}>
                 {tvPreviewUrl ? (
@@ -561,38 +644,67 @@ export default function HomeScreen({ navigation }) {
                     allowsFullscreen={false}
                     allowsPictureInPicture={false}
                   />
+                ) : tvPreviewImage ? (
+                  <Image source={{ uri: tvPreviewImage }} style={tvIsLiveSection ? styles.tvLiveLogo : styles.tvContentPoster} resizeMode={tvIsLiveSection ? 'contain' : 'cover'} />
                 ) : tvDisplayChannel?.stream_icon ? (
                   <Image source={{ uri: tvDisplayChannel.stream_icon }} style={styles.tvLiveLogo} resizeMode="contain" />
                 ) : (
-                  <Text style={styles.tvLiveFallback}>TV</Text>
+                  <Text style={styles.tvLiveFallback}>{tvIsLiveSection ? 'TV' : tvFocusedSection}</Text>
                 )}
                 <View style={styles.tvLiveShade} />
-                <Text style={styles.tvLiveName} numberOfLines={1}>{tvDisplayChannel?.name || 'TV en vivo'}</Text>
+                <Text style={styles.tvLiveName} numberOfLines={1}>{tvPreviewTitle}</Text>
                 <Text style={styles.tvLiveExpand}>⛶</Text>
               </View>
             </FocusableButton>
 
             <View style={styles.tvChannelRail}>
               <Text style={styles.tvRailArrow}>⌃</Text>
-              {tvSortedChannels.slice(0, 6).map((channel, index) => (
-                <FocusableButton
-                  key={`tv-home-${channel.stream_id || channel.name}`}
-                  style={styles.tvRailChannel}
-                  focusedStyle={styles.tvRailChannelFocused}
-                  onFocus={() => setTvFocusedChannel(channel)}
-                  onPress={() => openLiveFromHome(channel)}
-                >
-                  <Text style={styles.tvRailNumber}>{index + 1}</Text>
-                  {channel.stream_icon ? (
-                    <Image source={{ uri: channel.stream_icon }} style={styles.tvRailLogo} resizeMode="contain" />
-                  ) : (
-                    <View style={styles.tvRailLogoFallback}>
-                      <Text style={styles.tvRailLogoText}>{channel.name?.charAt(0)}</Text>
-                    </View>
-                  )}
-                  <Text style={styles.tvRailName} numberOfLines={1}>{channel.name}</Text>
-                </FocusableButton>
-              ))}
+              <FlatList
+                style={styles.tvRailList}
+                data={tvSectionItems}
+                keyExtractor={(item, index) => {
+                  const raw = getTVContentRaw(item);
+                  return `tv-home-${tvFocusedSection}-${raw.stream_id || raw.series_id || raw.name || index}`;
+                }}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={12}
+                maxToRenderPerBatch={12}
+                windowSize={7}
+                removeClippedSubviews={false}
+                renderItem={({ item }) => {
+                  const raw = getTVContentRaw(item);
+                  const image = tvIsLiveSection ? raw.stream_icon : getTVContentImage(item);
+                  const title = tvIsLiveSection ? raw.name : getTVContentTitle(item);
+                  return (
+                    <FocusableButton
+                      style={styles.tvRailChannel}
+                      focusedStyle={styles.tvRailChannelFocused}
+                      onFocus={() => {
+                        if (tvIsLiveSection) setTvFocusedChannel(raw);
+                        else setTvFocusedContent(item);
+                      }}
+                      onPress={() => {
+                        if (tvIsLiveSection) openLiveFromHome(raw);
+                        else openTVSectionItem(item);
+                      }}
+                    >
+                      {image ? (
+                        <Image source={{ uri: image }} style={styles.tvRailLogo} resizeMode={tvIsLiveSection ? 'contain' : 'cover'} />
+                      ) : (
+                        <View style={styles.tvRailLogoFallback}>
+                          <Text style={styles.tvRailLogoText}>{String(title || '?').charAt(0)}</Text>
+                        </View>
+                      )}
+                      <Text style={styles.tvRailName} numberOfLines={1}>{title}</Text>
+                    </FocusableButton>
+                  );
+                }}
+                ListEmptyComponent={(
+                  <View style={styles.tvRailEmpty}>
+                    <Text style={styles.tvRailEmptyText}>Sin contenido</Text>
+                  </View>
+                )}
+              />
               <Text style={styles.tvRailArrow}>v</Text>
             </View>
           </View>
@@ -998,6 +1110,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#101010',
   },
   tvLiveLogo: { width: '52%', height: '44%', opacity: 0.52 },
+  tvContentPoster: {
+    width: '100%',
+    height: '100%',
+  },
   tvLiveFallback: { color: colors.white, fontSize: 96, fontWeight: '900', opacity: 0.16 },
   tvLiveShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.22)' },
   tvLiveName: {
@@ -1020,6 +1136,9 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     paddingTop: 0,
     gap: 10,
+  },
+  tvRailList: {
+    flex: 1,
   },
   tvRailArrow: {
     color: 'rgba(255,255,255,0.72)',
@@ -1056,18 +1175,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tvRailLogoText: { color: colors.white, fontSize: 24, fontWeight: '900' },
-  tvRailNumber: {
-    width: 28,
-    color: 'rgba(255,255,255,0.86)',
-    fontSize: 18,
-    fontWeight: '900',
-    textAlign: 'right',
-  },
   tvRailName: {
     flex: 1,
     color: colors.white,
     fontSize: 18,
     fontWeight: '600',
+  },
+  tvRailEmpty: {
+    paddingVertical: 28,
+    alignItems: 'center',
+  },
+  tvRailEmptyText: {
+    color: colors.textSecondary,
+    fontSize: 16,
+    fontWeight: '700',
   },
 
   navTabs: {
